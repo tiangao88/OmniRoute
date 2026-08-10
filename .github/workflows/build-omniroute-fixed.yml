@@ -1,0 +1,70 @@
+# Build & publish a pinned OmniRoute image from the fixed release branch
+# Purpose: produce our OWN image (ghcr.io/tiangao88/omniroute:3.8.50-fixed)
+# carrying the rate-limit heartbeat workaround (applyLimiterSettings),
+# because upstream has NOT published a 3.8.50 tag to Docker Hub yet.
+#
+# Trigger: any push to the `release/v3.8.50` branch of this fork, or manual.
+# Output: GHCR image tagged :3.8.50-fixed and :latest-fixed.
+#
+# NOTE: needs repo `GITHUB_TOKEN` with `packages: write` (default for the
+# workflow below) and the fork/package set public so Coolify can pull it
+# without embedding credentials.
+
+name: Build & Publish OmniRoute (fixed image)
+
+on:
+  push:
+    branches:
+      - release/v3.8.50
+    paths-ignore:
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/tiangao88/omniroute
+  TAG: 3.8.50-fixed
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: release/v3.8.50
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Log in to GHCR using the repo's built-in token (no stored secret).
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Uses upstream's own Dockerfile (multi-stage node build, incl. its
+      # package-lock verification and native-module rebuild steps).
+      - name: Build & push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ env.TAG }}
+            ${{ env.IMAGE }}:latest-fixed
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify resolved version string
+        run: |
+          V=$(grep -m1 '"version"' package.json | sed -E 's/.*"([0-9][^"]*)".*/\1/')
+          echo "package version: $V"
+          test -n "$V"
