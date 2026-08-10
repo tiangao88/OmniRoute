@@ -15,8 +15,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { getModelTargetFormat } from "../../open-sse/config/providerModels.ts";
+import {
+  getModelTargetFormat,
+  getProviderModel,
+  PROVIDER_ID_TO_ALIAS,
+} from "../../open-sse/config/providerModels.ts";
 import { DefaultExecutor } from "../../open-sse/executors/default.ts";
+import { resolveChatCoreTargetFormat } from "../../open-sse/handlers/chatCore/targetFormat.ts";
 
 test("getModelTargetFormat routes the public OpenAI GPT-5.6 family through Responses", () => {
   for (const modelId of ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
@@ -42,4 +47,41 @@ test("DefaultExecutor keeps /v1/chat/completions for gpt-5.4", () => {
   const executor = new DefaultExecutor("openai");
   const url = executor.buildUrl("gpt-5.4", true, 0, null);
   assert.equal(url, "https://api.openai.com/v1/chat/completions");
+});
+
+test("cross-provider GPT-5.6 keeps the provider's Chat Completions wire format", () => {
+  for (const provider of ["nous", "openrouter"]) {
+    assert.equal(
+      getModelTargetFormat(provider, "openai/gpt-5.6-luna"),
+      null,
+      `${provider} must not inherit OpenAI's Responses target format`
+    );
+    assert.equal(
+      getModelTargetFormat(provider, "gpt-5.6-luna"),
+      null,
+      `${provider} must not inherit OpenAI's Responses target format for bare ids`
+    );
+  }
+});
+
+test("chatCore target-format resolution keeps provider defaults for cross-provider GPT-5.6", () => {
+  for (const provider of ["nous", "openrouter"]) {
+    const result = resolveChatCoreTargetFormat({
+      provider,
+      resolvedModel: "openai/gpt-5.6-luna",
+      apiFormat: undefined,
+      sourceFormat: "openai",
+      customModelTargetFormat: undefined,
+      providerSpecificData: undefined,
+    });
+    assert.equal(result.alias, PROVIDER_ID_TO_ALIAS[provider] || provider);
+    assert.equal(result.targetFormat, "openai");
+  }
+});
+
+test("global capability fallback remains available without leaking wire format", () => {
+  const metadata = getProviderModel("nous", "gpt-5.6-luna");
+  assert.equal(metadata?.supportsVision, true);
+  assert.equal(metadata?.supportsReasoning, true);
+  assert.equal(getModelTargetFormat("nous", "gpt-5.6-luna"), null);
 });

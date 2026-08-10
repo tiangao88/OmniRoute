@@ -170,8 +170,29 @@ export function findModelName(aliasOrId: string, modelId: string): string {
 }
 
 export function getModelTargetFormat(aliasOrId: string, modelId: string): string | null {
-  const models = PROVIDER_MODELS[aliasOrId];
-  const found = models?.find((m) => m.id === modelId) || getGlobalModel(modelId);
+  const alias = PROVIDER_ID_TO_ALIAS[aliasOrId] || aliasOrId;
+  const models = PROVIDER_MODELS[alias] || PROVIDER_MODELS[aliasOrId];
+  // Wire-format metadata is provider-scoped. A model's capabilities can be
+  // shared globally, but an OpenAI registry entry's Responses target must not
+  // leak into another provider's Chat Completions connection (e.g.
+  // Nous/OpenRouter `openai/gpt-5.6-luna`).
+  // Preserve the provider-prefix normalization used before the global model
+  // fallback was added: `openai/openai/gpt-5.6-luna` is an OpenAI-local
+  // spelling, not a reason to consult another provider's metadata.
+  const prefixes = [aliasOrId, alias].filter(
+    (value, index, values) => values.indexOf(value) === index
+  );
+  const bareModelId =
+    typeof modelId === "string"
+      ? prefixes.reduce(
+          (current, prefix) =>
+            current === modelId && modelId.startsWith(`${prefix}/`)
+              ? modelId.slice(prefix.length + 1)
+              : current,
+          modelId
+        )
+      : modelId;
+  const found = models?.find((m) => m.id === bareModelId);
   if (found?.targetFormat) return found.targetFormat;
   // #5842: OpenAI "*-pro" reasoning models (o1-pro, gpt-5.x-pro) are only served by
   // the native /v1/responses endpoint — /v1/chat/completions 404s ("only supported
