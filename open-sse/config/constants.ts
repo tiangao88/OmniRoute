@@ -228,13 +228,13 @@ export const PROVIDER_PROFILES = {
     circuitBreakerThreshold: envInt("OMNIROUTE_CIRCUIT_BREAKER_OAUTH_THRESHOLD", 8),
     circuitBreakerReset: envInt("OMNIROUTE_CIRCUIT_BREAKER_OAUTH_RESET_MS", 60000),
     // Provider-level circuit breaker (entire provider cooldown after repeated failures)
-    providerFailureThreshold: 10, // Scaled for 500+ connections (was 3)
-    providerFailureWindowMs: 900000, // 15min window (was 10min)
-    providerCooldownMs: 300000, // 5min cooldown when threshold reached
+    providerFailureThreshold: envInt("OMNIROUTE_PROVIDER_BREAKER_OAUTH_FAILURE_THRESHOLD", 10), // Scaled for 500+ connections (was 3)
+    providerFailureWindowMs: envInt("OMNIROUTE_PROVIDER_BREAKER_OAUTH_FAILURE_WINDOW_MS", 900000), // 15min window (was 10min)
+    providerCooldownMs: envInt("OMNIROUTE_PROVIDER_BREAKER_OAUTH_COOLDOWN_MS", 300000), // 5min cooldown when threshold reached
     // Adaptive circuit breaker v2 settings
-    degradationThreshold: 5, // Enter DEGRADED at this many failures
-    maxBackoffMultiplier: 8, // Max 8x resetTimeout escalation
-    backoffEscalationCount: 2, // Escalate after 2 open cycles
+    degradationThreshold: envInt("OMNIROUTE_PROVIDER_BREAKER_OAUTH_DEGRADATION_THRESHOLD", 5), // Enter DEGRADED at this many failures
+    maxBackoffMultiplier: envInt("OMNIROUTE_PROVIDER_BREAKER_OAUTH_MAX_BACKOFF_MULTIPLIER", 8), // Max 8x resetTimeout escalation
+    backoffEscalationCount: envInt("OMNIROUTE_PROVIDER_BREAKER_OAUTH_BACKOFF_ESCALATION_COUNT", 2), // Escalate after 2 open cycles
   },
   apikey: {
     transientCooldown: 3000, // 3s (API providers recover faster)
@@ -243,12 +243,12 @@ export const PROVIDER_PROFILES = {
     circuitBreakerThreshold: envInt("OMNIROUTE_CIRCUIT_BREAKER_API_KEY_THRESHOLD", 12),
     circuitBreakerReset: envInt("OMNIROUTE_CIRCUIT_BREAKER_API_KEY_RESET_MS", 30000),
     // Provider-level circuit breaker (entire provider cooldown after repeated failures)
-    providerFailureThreshold: 15, // Scaled for 500+ connections (was 5)
-    providerFailureWindowMs: 1800000, // 30min window (was 20min)
-    providerCooldownMs: 600000, // 10min cooldown when threshold reached
-    degradationThreshold: 7,
-    maxBackoffMultiplier: 4,
-    backoffEscalationCount: 3,
+    providerFailureThreshold: envInt("OMNIROUTE_PROVIDER_BREAKER_API_KEY_FAILURE_THRESHOLD", 15), // Scaled for 500+ connections (was 5)
+    providerFailureWindowMs: envInt("OMNIROUTE_PROVIDER_BREAKER_API_KEY_FAILURE_WINDOW_MS", 1800000), // 30min window (was 20min)
+    providerCooldownMs: envInt("OMNIROUTE_PROVIDER_BREAKER_API_KEY_COOLDOWN_MS", 600000), // 10min cooldown when threshold reached
+    degradationThreshold: envInt("OMNIROUTE_PROVIDER_BREAKER_API_KEY_DEGRADATION_THRESHOLD", 7),
+    maxBackoffMultiplier: envInt("OMNIROUTE_PROVIDER_BREAKER_API_KEY_MAX_BACKOFF_MULTIPLIER", 4),
+    backoffEscalationCount: envInt("OMNIROUTE_PROVIDER_BREAKER_API_KEY_BACKOFF_ESCALATION_COUNT", 3),
   },
   // Local providers (localhost inference backends like Ollama, LM Studio, oMLX).
   // Not yet wired into getProviderProfile() — will be used when local provider_nodes
@@ -260,9 +260,9 @@ export const PROVIDER_PROFILES = {
     circuitBreakerThreshold: envInt("OMNIROUTE_CIRCUIT_BREAKER_LOCAL_THRESHOLD", 2),
     circuitBreakerReset: envInt("OMNIROUTE_CIRCUIT_BREAKER_LOCAL_RESET_MS", 15000),
     // Provider-level circuit breaker (entire provider cooldown after repeated failures)
-    providerFailureThreshold: 2, // 2 failures trigger provider cooldown
-    providerFailureWindowMs: 300000, // 5min window for counting failures
-    providerCooldownMs: 60000, // 1min cooldown when threshold reached
+    providerFailureThreshold: envInt("OMNIROUTE_PROVIDER_BREAKER_LOCAL_FAILURE_THRESHOLD", 2), // 2 failures trigger provider cooldown
+    providerFailureWindowMs: envInt("OMNIROUTE_PROVIDER_BREAKER_LOCAL_FAILURE_WINDOW_MS", 300000), // 5min window for counting failures
+    providerCooldownMs: envInt("OMNIROUTE_PROVIDER_BREAKER_LOCAL_COOLDOWN_MS", 60000), // 1min cooldown when threshold reached
   },
 };
 

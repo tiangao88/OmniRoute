@@ -705,6 +705,21 @@ Provider-level circuit breaker tuning. Defaults reflect the scaled values used s
 | `OMNIROUTE_CIRCUIT_BREAKER_API_KEY_RESET_MS`  | `30000` | `open-sse/config/constants.ts` | Reset window (ms) for API-key provider breaker.                                                                        |
 | `OMNIROUTE_CIRCUIT_BREAKER_LOCAL_THRESHOLD`   | `2`     | `open-sse/config/constants.ts` | Consecutive failure threshold for local providers (Ollama, LM Studio, ...).                                            |
 | `OMNIROUTE_CIRCUIT_BREAKER_LOCAL_RESET_MS`    | `15000` | `open-sse/config/constants.ts` | Reset window (ms) for local provider breaker.                                                                          |
+| `OMNIROUTE_PROVIDER_BREAKER_OAUTH_FAILURE_THRESHOLD` | `10` | `open-sse/config/constants.ts` | Provider-level breaker: failures within the window before the entire OAuth provider enters cooldown. |
+| `OMNIROUTE_PROVIDER_BREAKER_OAUTH_FAILURE_WINDOW_MS` | `900000` | `open-sse/config/constants.ts` | Provider-level breaker: rolling failure-count window (ms) for OAuth providers. |
+| `OMNIROUTE_PROVIDER_BREAKER_OAUTH_COOLDOWN_MS` | `300000` | `open-sse/config/constants.ts` | Provider-level breaker: cooldown (ms) once the OAuth provider threshold is reached. |
+| `OMNIROUTE_PROVIDER_BREAKER_OAUTH_DEGRADATION_THRESHOLD` | `5` | `open-sse/config/constants.ts` | OAuth provider enters DEGRADED at this many failures. |
+| `OMNIROUTE_PROVIDER_BREAKER_OAUTH_MAX_BACKOFF_MULTIPLIER` | `8` | `open-sse/config/constants.ts` | OAuth provider max resetTimeout escalation multiplier. |
+| `OMNIROUTE_PROVIDER_BREAKER_OAUTH_BACKOFF_ESCALATION_COUNT` | `2` | `open-sse/config/constants.ts` | OAuth provider escalates after this many open cycles. |
+| `OMNIROUTE_PROVIDER_BREAKER_API_KEY_FAILURE_THRESHOLD` | `15` | `open-sse/config/constants.ts` | Provider-level breaker: failures within the window before the entire API-key provider enters cooldown. |
+| `OMNIROUTE_PROVIDER_BREAKER_API_KEY_FAILURE_WINDOW_MS` | `1800000` | `open-sse/config/constants.ts` | Provider-level breaker: rolling failure-count window (ms) for API-key providers. |
+| `OMNIROUTE_PROVIDER_BREAKER_API_KEY_COOLDOWN_MS` | `600000` | `open-sse/config/constants.ts` | Provider-level breaker: cooldown (ms) once the API-key provider threshold is reached. |
+| `OMNIROUTE_PROVIDER_BREAKER_API_KEY_DEGRADATION_THRESHOLD` | `7` | `open-sse/config/constants.ts` | API-key provider enters DEGRADED at this many failures. |
+| `OMNIROUTE_PROVIDER_BREAKER_API_KEY_MAX_BACKOFF_MULTIPLIER` | `4` | `open-sse/config/constants.ts` | API-key provider max resetTimeout escalation multiplier. |
+| `OMNIROUTE_PROVIDER_BREAKER_API_KEY_BACKOFF_ESCALATION_COUNT` | `3` | `open-sse/config/constants.ts` | API-key provider escalates after this many open cycles. |
+| `OMNIROUTE_PROVIDER_BREAKER_LOCAL_FAILURE_THRESHOLD` | `2` | `open-sse/config/constants.ts` | Provider-level breaker: failures before the entire local provider enters cooldown. |
+| `OMNIROUTE_PROVIDER_BREAKER_LOCAL_FAILURE_WINDOW_MS` | `300000` | `open-sse/config/constants.ts` | Provider-level breaker: rolling failure-count window (ms) for local providers. |
+| `OMNIROUTE_PROVIDER_BREAKER_LOCAL_COOLDOWN_MS` | `60000` | `open-sse/config/constants.ts` | Provider-level breaker: cooldown (ms) once the local provider threshold is reached. |
 | `PIN_DROP_BACKOFF_LEVEL`                      | `2`     | `open-sse/services/combo.ts`   | Backoff depth at which a context-cache pin's provider is deemed durably unhealthy and the pin is dropped for failover. |
 | `PIN_DROP_GRACE_MS`                           | `20000` | `open-sse/services/combo.ts`   | Anti-flap window (ms) tolerating brief transient cooldowns before dropping a context-cache pin.                        |
 
