@@ -16,8 +16,6 @@ on:
   push:
     branches:
       - release/v3.8.50
-    paths-ignore:
-      - ".github/workflows/**"
   workflow_dispatch:
 
 permissions:
