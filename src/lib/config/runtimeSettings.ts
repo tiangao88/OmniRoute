@@ -51,9 +51,20 @@ interface RuntimeSettingsSnapshot {
 // Default bypass policy: kill-switch on, `/api/mcp/` bypassable. Mirrors the
 // pre-T-011 compile-time constant so the route guard works identically before
 // the first `applyRuntimeSettings` call (e.g. cold-boot requests).
+//
+// PMO City fork addition (2026-08-11): the authz proxy bundle in this build
+// is compiled with this default baked in and never hydrates the DB-driven
+// list (the hot-reload lives in a server-init chunk the proxy bundle does not
+// load). Adding the read-only resilience paths here makes them reachable
+// remotely with an authenticated dashboard session, matching the settings
+// PATCH value (`localOnlyManageScopeBypassPrefixes`) so both stay in sync.
 const DEFAULT_AUTHZ_BYPASS_SNAPSHOT: AuthzBypassSnapshot = {
   enabled: true,
-  prefixes: ["/api/mcp/"],
+  prefixes: [
+    "/api/mcp/",
+    "/api/resilience/connections",
+    "/dashboard/resilience/connections",
+  ],
 };
 
 const DEFAULT_RUNTIME_SETTINGS_SNAPSHOT: RuntimeSettingsSnapshot = {
