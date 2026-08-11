@@ -117,8 +117,19 @@ export { SPAWN_CAPABLE_PREFIXES, SPAWN_CAPABLE_PATTERNS };
  * The RUNTIME decision in `isLocalOnlyBypassableByManageScope` does NOT
  * consult this constant — it reads `getAuthzBypassSnapshot().prefixes`,
  * which is hot-reloaded on every settings PATCH.
+ *
+ * PMO City fork addition (2026-08-11): the authz proxy bundle in this build
+ * is compiled with this default baked in and does not hydrate the DB-driven
+ * list, so `/dashboard/resilience/connections` + its data API were
+ * unreachable remotely despite the settings PATCH. Adding them to the
+ * compile-time default restores the page. They are READ-ONLY (no child
+ * process spawn) — see the LOCAL_ONLY_API_PREFIXES entries.
  */
-export const LOCAL_ONLY_MANAGE_SCOPE_BYPASS_PREFIXES: ReadonlyArray<string> = ["/api/mcp/"];
+export const LOCAL_ONLY_MANAGE_SCOPE_BYPASS_PREFIXES: ReadonlyArray<string> = [
+  "/api/mcp/",
+  "/api/resilience/connections",
+  "/dashboard/resilience/connections",
+];
 
 export const ALWAYS_PROTECTED_API_PATHS: ReadonlyArray<string> = [
   "/api/shutdown",

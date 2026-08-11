@@ -112,9 +112,14 @@ test("AC-2: bypassEnabled + bypassPrefixes reflect getSettings() (defaults)", as
     bypassEnabled: boolean;
     bypassPrefixes: string[];
   };
-  // Default snapshot: kill-switch ON, single prefix /api/mcp/.
+  // Default snapshot: kill-switch ON, prefixes /api/mcp/ + read-only
+  // resilience paths (PMO City fork default, 2026-08-11).
   assert.equal(body.bypassEnabled, true);
-  assert.deepEqual(body.bypassPrefixes, ["/api/mcp/"]);
+  assert.deepEqual(body.bypassPrefixes, [
+    "/api/mcp/",
+    "/api/resilience/connections",
+    "/dashboard/resilience/connections",
+  ]);
 });
 
 test("AC-2: bypassEnabled flips after settings mutation", async () => {
