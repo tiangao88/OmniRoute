@@ -192,7 +192,12 @@ test("AC-7: PATCH adds prefix → applyRuntimeSettings fires + getAuthzBypassSna
   await runtime.applyRuntimeSettings(seeded);
 
   const before = routeGuard.LOCAL_ONLY_MANAGE_SCOPE_BYPASS_PREFIXES;
-  assert.deepEqual([...before], ["/api/mcp/"]);
+  // PMO City fork default (2026-08-11): mcp + read-only resilience paths.
+  assert.deepEqual([...before], [
+    "/api/mcp/",
+    "/api/resilience/connections",
+    "/dashboard/resilience/connections",
+  ]);
 
   // Measure the snapshot-read latency (spec SLA: <50 ms).
   const t0 = process.hrtime.bigint();
