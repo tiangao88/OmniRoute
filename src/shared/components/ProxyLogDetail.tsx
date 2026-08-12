@@ -103,7 +103,11 @@ export default function ProxyLogDetail({ log, onClose }) {
             <div>
               <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">Proxy</div>
               <div className="text-sm font-medium font-mono text-primary">
-                {log.proxy ? `${log.proxy.type}://${log.proxy.host}:${log.proxy.port}` : "Direct"}
+                {log.proxy
+                  ? log.proxy.name
+                    ? `${log.proxy.name} (${log.proxy.type}://${log.proxy.host}:${log.proxy.port})`
+                    : `${log.proxy.type}://${log.proxy.host}:${log.proxy.port}`
+                  : "Direct"}
               </div>
             </div>
             <div>

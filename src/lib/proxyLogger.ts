@@ -18,6 +18,9 @@ interface ProxyInfo {
   type: string;
   host: string;
   port: number | string;
+  /** Registry name (e.g. `murphy-eu-fr`) — carried by registry resolution so the
+   *  proxy log can identify a leg even when many entries share host:port. */
+  name?: string;
 }
 
 interface ProxyLogEntry {
@@ -78,7 +81,7 @@ function loadFromDb() {
         timestamp: row.timestamp,
         status: row.status || "success",
         proxy: row.proxy_host
-          ? { type: row.proxy_type, host: row.proxy_host, port: row.proxy_port }
+          ? { type: row.proxy_type, host: row.proxy_host, port: row.proxy_port, name: row.proxy_name || undefined }
           : null,
         level: row.level || "direct",
         levelId: row.level_id || null,
@@ -133,7 +136,8 @@ export function logProxyEvent(entry: ProxyLogInput) {
     console.log(
       `[ProxyEgress] ${log.provider || "-"}/${log.account || "-"} ` +
         `in=${log.clientIp || "?"} out=${log.egressIp || "?"} ` +
-        `proxy=${log.level}${log.proxy ? `:${log.proxy.host}` : ""} status=${log.status}`
+        `proxy=${log.level}${log.proxy ? `:${log.proxy.host}` : ""}` +
+        `${log.proxy?.name ? ` name=${log.proxy.name}` : ""} status=${log.status}`
     );
   }
 
@@ -148,10 +152,10 @@ export function logProxyEvent(entry: ProxyLogInput) {
     try {
       const db = getDbInstance();
       db.prepare(
-        `INSERT INTO proxy_logs (id, timestamp, status, proxy_type, proxy_host, proxy_port,
+        `INSERT INTO proxy_logs (id, timestamp, status, proxy_type, proxy_host, proxy_port, proxy_name,
           level, level_id, provider, target_url, public_ip, egress_ip, latency_ms, error,
           connection_id, combo_id, account, tls_fingerprint)
-        VALUES (@id, @timestamp, @status, @proxyType, @proxyHost, @proxyPort,
+        VALUES (@id, @timestamp, @status, @proxyType, @proxyHost, @proxyPort, @proxyName,
           @level, @levelId, @provider, @targetUrl, @clientIp, @egressIp, @latencyMs, @error,
           @connectionId, @comboId, @account, @tlsFingerprint)`
       ).run({
@@ -161,6 +165,7 @@ export function logProxyEvent(entry: ProxyLogInput) {
         proxyType: log.proxy?.type || null,
         proxyHost: log.proxy?.host || null,
         proxyPort: log.proxy?.port ? Number(log.proxy.port) : null,
+        proxyName: log.proxy?.name || null,
         level: log.level,
         levelId: log.levelId,
         provider: log.provider,
@@ -216,6 +221,7 @@ export function getProxyLogs(filters: ProxyLogFilters = {}) {
     logs = logs.filter(
       (l) =>
         (l.proxy?.host || "").toLowerCase().includes(q) ||
+        (l.proxy?.name || "").toLowerCase().includes(q) ||
         (l.provider || "").toLowerCase().includes(q) ||
         (l.targetUrl || "").toLowerCase().includes(q) ||
         (l.clientIp || "").toLowerCase().includes(q) ||
