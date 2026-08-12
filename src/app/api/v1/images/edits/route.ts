@@ -585,6 +585,59 @@ async function postHandler(request: Request, _context?: unknown) {
     });
   }
 
+  // Built-in OpenRouter is an OpenAI-compatible provider: its own
+  // /v1/images/edits endpoint accepts the same multipart shape as the
+  // custom-provider path below. Forward the edit there (#10197), using the
+  // registry base URL so resolveImageBaseUrl rewrites
+  // .../images/generations → .../images/edits.
+  if (providerConfig?.id === "openrouter") {
+    const credentials = await getProviderCredentialsWithQuotaPreflight(
+      parsed.provider,
+      null,
+      allowedConnections,
+      resolvedModel
+    );
+    if (!credentials) {
+      return errorResponse(
+        HTTP_STATUS.UNAUTHORIZED,
+        `No credentials for provider: ${parsed.provider}`
+      );
+    }
+    if (credentials.allRateLimited) {
+      return unavailableResponse(
+        HTTP_STATUS.RATE_LIMITED,
+        `[${parsed.provider}] All accounts rate limited`,
+        credentials.retryAfter,
+        credentials.retryAfterHuman
+      );
+    }
+
+    const result = await handleOpenAIImageEdit({
+      provider: parsed.provider,
+      model: parsed.model,
+      credentials: {
+        ...credentials,
+        baseUrl: providerConfig.baseUrl,
+      },
+      prompt,
+      imageBytes,
+      imageMime,
+      size: size ?? undefined,
+      responseFormat: responseFormat ?? undefined,
+      n: 1,
+      log,
+    });
+
+    if (result.success) {
+      await clearRecoveredProviderState(credentials);
+      return jsonResponse(result.data);
+    }
+    return jsonResponse(
+      toJsonErrorPayload(result.error, "Image edit provider error"),
+      result.status
+    );
+  }
+
   // Other built-in providers do not expose an OpenAI-compatible edit endpoint.
   if (providerConfig) {
     return errorResponse(
