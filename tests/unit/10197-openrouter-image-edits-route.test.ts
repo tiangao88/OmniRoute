@@ -1,11 +1,12 @@
 // #10197 (tiangao88): route-level coverage for the built-in OpenRouter branch
 // that /v1/images/edits gained in this PR. Exercises the actual POST(request)
-// handler so the credentials / rate-limit / forward-to-OpenRouter branches
+// handler so the credentials / rate-limit / unified-Image-API forwarding branches
 // added to route.ts itself are proven, not just the downstream service call.
 //
 // Before this change: POST /v1/images/edits rejected the built-in `openrouter`
 // provider ("Image edit is not supported for built-in provider"), so image
-// Combos routing through OpenRouter could generate but never edit.
+// Combos routing through OpenRouter could generate but never edit. OpenRouter's
+// current reference-image contract is POST /api/v1/images with input_references.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -70,21 +71,31 @@ test.after(() => {
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 
-test("#10197 v1 image edit POST forwards built-in openrouter edits to openrouter.ai/images/edits", async () => {
+test("#10197 v1 image edit POST forwards built-in openrouter edits to the unified Image API", async () => {
   await seedOpenRouterConnection();
 
   let hitUrl: string | null = null;
   let hitAuth: string | null = null;
-  let hitBody: Buffer | null = null;
+  let hitBody = "";
 
   globalThis.fetch = async (url, init: RequestInit = {}) => {
     hitUrl = String(url);
-    hitAuth = String(init.headers instanceof Headers ? init.headers.get("authorization") : "");
-    // capture the multipart body as raw bytes
+    const headers = init.headers;
+    hitAuth =
+      headers instanceof Headers
+        ? String(headers.get("authorization") || "")
+        : String(
+            (headers as Record<string, string> | undefined)?.authorization ||
+              (headers as Record<string, string> | undefined)?.Authorization ||
+              ""
+          );
+    // The OpenRouter adapter sends JSON with input_references, not multipart.
     const raw = init.body;
-    if (raw instanceof ArrayBuffer) hitBody = Buffer.from(raw);
+    if (typeof raw === "string") hitBody = raw;
+    else if (raw instanceof Uint8Array) hitBody = Buffer.from(raw).toString("utf8");
+    else if (raw instanceof ArrayBuffer) hitBody = Buffer.from(raw).toString("utf8");
     else if (raw && typeof (raw as { arrayBuffer?: unknown }).arrayBuffer === "function") {
-      hitBody = Buffer.from(await (raw as { arrayBuffer(): Promise<ArrayBuffer> }).arrayBuffer());
+      hitBody = Buffer.from(await (raw as { arrayBuffer(): Promise<ArrayBuffer> }).arrayBuffer()).toString("utf8");
     }
     return new Response(
       JSON.stringify({ data: [{ b64_json: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64") }] }),
@@ -108,18 +119,20 @@ test("#10197 v1 image edit POST forwards built-in openrouter edits to openrouter
   assert.equal(response.status, 200);
   assert.ok(body.data[0].b64_json, "edit must return an image payload");
 
-  // Must hit OpenRouter's own edit endpoint (registry base URL rewritten).
-  assert.equal(hitUrl, "https://openrouter.ai/api/v1/images/edits");
+  // OpenRouter's current image-to-image endpoint is the unified Image API.
+  assert.equal(hitUrl, "https://openrouter.ai/api/v1/images");
   // Must carry the OpenRouter connection key as a Bearer token.
   assert.equal(hitAuth, "Bearer sk-or-test-openrouter-edits");
-  // Multipart body must include model (provider prefix stripped) and prompt.
-  assert.ok(hitBody, "multipart body must be captured");
-  const bodyStr = hitBody.toString("utf8");
-  assert.ok(bodyStr.includes('name="model"'), "multipart must carry model field");
-  assert.ok(bodyStr.includes("google/gemini-3.1-flash-image-preview"), "model must be prefix-stripped");
-  assert.ok(bodyStr.includes('name="prompt"'), "multipart must carry prompt field");
-  assert.ok(bodyStr.includes("add a red hat"), "prompt must be forwarded");
-  assert.ok(bodyStr.includes('name="image"'), "multipart must carry the image file");
+  assert.ok(hitBody, "JSON body must be captured");
+  const forwarded = JSON.parse(hitBody) as {
+    model?: string;
+    prompt?: string;
+    input_references?: Array<{ image_url?: { url?: string } }>;
+  };
+  assert.equal(forwarded.model, "google/gemini-3.1-flash-image-preview");
+  assert.equal(forwarded.prompt, "add a red hat");
+  assert.equal(forwarded.input_references?.length, 1);
+  assert.match(forwarded.input_references?.[0]?.image_url?.url || "", /^data:image\/png;base64,/);
 });
 
 test("#10197 v1 image edit POST surfaces missing openrouter credentials", async () => {

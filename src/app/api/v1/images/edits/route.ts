@@ -3,6 +3,7 @@ import {
   handleCodexImageEdit,
   handleImageEdit,
   handleOpenAIImageEdit,
+  handleOpenRouterImageEdit,
 } from "@omniroute/open-sse/handlers/imageGeneration.ts";
 import {
   handleFalAIImageEdit,
@@ -585,11 +586,10 @@ async function postHandler(request: Request, _context?: unknown) {
     });
   }
 
-  // Built-in OpenRouter is an OpenAI-compatible provider: its own
-  // /v1/images/edits endpoint accepts the same multipart shape as the
-  // custom-provider path below. Forward the edit there (#10197), using the
-  // registry base URL so resolveImageBaseUrl rewrites
-  // .../images/generations → .../images/edits.
+  // Built-in OpenRouter uses its unified Image API for reference-image
+  // edits: POST /api/v1/images with input_references. Forward through the
+  // provider-specific adapter (#10197), rather than the multipart
+  // /images/edits path used by custom OpenAI-compatible nodes.
   if (providerConfig?.id === "openrouter") {
     const credentials = await getProviderCredentialsWithQuotaPreflight(
       parsed.provider,
@@ -612,18 +612,15 @@ async function postHandler(request: Request, _context?: unknown) {
       );
     }
 
-    const result = await handleOpenAIImageEdit({
+    const result = await handleOpenRouterImageEdit({
       provider: parsed.provider,
       model: parsed.model,
-      credentials: {
-        ...credentials,
-        baseUrl: providerConfig.baseUrl,
-      },
+      baseUrl: providerConfig.baseUrl,
+      credentials,
       prompt,
       imageBytes,
       imageMime,
       size: size ?? undefined,
-      responseFormat: responseFormat ?? undefined,
       n: 1,
       log,
     });

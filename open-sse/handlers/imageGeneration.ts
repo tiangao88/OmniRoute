@@ -1266,6 +1266,107 @@ export async function handleOpenAIImageEdit({
   return result;
 }
 
+/**
+ * Handle OpenRouter's unified Image API reference-image flow.
+ *
+ * OpenRouter does not expose `/images/edits`; image-to-image requests use
+ * `POST /api/v1/images` with `input_references` containing data-URL images.
+ * Keep this separate from the generic multipart `/images/edits` forwarder,
+ * whose contract is used by custom OpenAI-compatible nodes (#10197).
+ */
+export async function handleOpenRouterImageEdit({
+  model,
+  provider,
+  baseUrl,
+  credentials,
+  prompt,
+  imageBytes,
+  imageMime,
+  size,
+  n = 1,
+  log,
+}: {
+  model: string;
+  provider: string;
+  baseUrl: string;
+  credentials:
+    | {
+        apiKey?: string;
+        accessToken?: string;
+      }
+    | null
+    | undefined;
+  prompt: string;
+  imageBytes: Buffer;
+  imageMime?: string | null;
+  size?: string | null;
+  n?: number;
+  log?: { info: (tag: string, message: string) => void } | null;
+}) {
+  const startTime = Date.now();
+  let url = baseUrl.trim();
+  while (url.endsWith("/")) url = url.slice(0, -1);
+  if (url.endsWith("/images/generations")) {
+    url = url.slice(0, -"/images/generations".length) + "/images";
+  } else if (!url.endsWith("/images")) {
+    url += "/images";
+  }
+
+  const mime = imageMime || "image/png";
+  const upstreamBody: Record<string, unknown> = {
+    model,
+    prompt,
+    input_references: [
+      {
+        type: "image_url",
+        image_url: {
+          url: `data:${mime};base64,${imageBytes.toString("base64")}`,
+        },
+      },
+    ],
+    n: n || 1,
+  };
+  if (size) upstreamBody.size = size;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const token = credentials?.apiKey || credentials?.accessToken;
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  log?.info(
+    "IMAGE",
+    `${provider}/${model} (reference edit) | prompt: "${prompt.slice(0, 60)}..." -> ${url}`
+  );
+
+  const result = await fetchImageEndpoint(
+    url,
+    headers,
+    JSON.stringify(upstreamBody),
+    provider,
+    log
+  );
+
+  saveCallLog({
+    method: "POST",
+    path: "/v1/images/edits",
+    status: result.status || (result.success ? 200 : 502),
+    model: `${provider}/${model}`,
+    provider,
+    duration: Date.now() - startTime,
+    tokens: { prompt_tokens: 0, completion_tokens: 0 },
+    error: result.success
+      ? null
+      : typeof result.error === "string"
+        ? result.error.slice(0, 500)
+        : null,
+    requestBody: { model, prompt: prompt.slice(0, 200), size: size || "default", n: n || 1 },
+    responseBody: result.success ? { images_count: result.data?.data?.length || 0 } : null,
+  }).catch(() => {});
+
+  return result;
+}
+
 export async function handleImageEdit({
   provider,
   model,
