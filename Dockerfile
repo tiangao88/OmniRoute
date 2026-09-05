@@ -208,7 +208,7 @@ COPY . ./
 # it, and fail the build loudly if the binary is still missing.
 RUN --mount=type=secret,id=github_token,env=TLS_CLIENT_GITHUB_TOKEN \
   node patches/tls-client-postinstall-auth.cjs \
-  && node node_modules/tls-client-node/scripts/postinstall.js \
+  && TLS_CLIENT_VERSION=1.15.1 node node_modules/tls-client-node/scripts/postinstall.js \
   && (test -n "$(find node_modules/tls-client-node/bin -mindepth 1 -print -quit 2>/dev/null)" \
       || (echo "tls-client-node native binary missing after postinstall — GitHub API fetch likely rate-limited or failed (#7802)" >&2 && exit 1))
 
