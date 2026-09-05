@@ -114,14 +114,19 @@ RUN test -f package-lock.json \
 # in production (TlsClientUnavailableError, #7802). Run it explicitly here so
 # a broken/rate-limited fetch fails the BUILD loudly instead of shipping a
 # broken image.
+# Fork mitigation for #7802: the tls-client-node postinstall fetches its
+# native binary from the GitHub Releases API WITHOUT auth; on shared CI
+# runners that endpoint is rate-limited to 60 req/h per IP and flakes the
+# build. The workflow passes its own short-lived GITHUB_TOKEN as a build-arg
+# (builder stage only - ARGs do not propagate past this stage, so the
+# published image never contains it).
+ARG TLS_CLIENT_GITHUB_TOKEN=""
+ENV TLS_CLIENT_GITHUB_TOKEN="${TLS_CLIENT_GITHUB_TOKEN}"
 RUN --mount=type=cache,id=s/92ca8a61-c1ba-421f-a389-d48ac7258c2d-npm-cache,target=/root/.npm \
   npm ci --include=optional --no-audit --no-fund --legacy-peer-deps --ignore-scripts \
   && (cd node_modules/better-sqlite3 \
       && node /usr/local/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js rebuild) \
-  && node -e "require('better-sqlite3')(':memory:').close()" \
-  && node node_modules/tls-client-node/scripts/postinstall.js \
-  && (test -n "$(find node_modules/tls-client-node/bin -mindepth 1 -print -quit 2>/dev/null)" \
-      || (echo "tls-client-node native binary missing after postinstall — GitHub API fetch likely rate-limited or failed (#7802)" >&2 && exit 1))
+  && node -e "require('better-sqlite3')(':memory:').close()"
 
 # Build with Turbopack (stable in Next 16, the repo default). The v3.8.27-era
 # TurbopackInternalError panic ("entered unreachable code: there must be a path to a
@@ -200,6 +205,14 @@ ARG OMNIROUTE_BUILD_WORKERS=3
 ENV CIRCLE_NODE_TOTAL=${OMNIROUTE_BUILD_WORKERS}
 
 COPY . ./
+# Fork #7802 (continued): the tls-client-node postinstall fetches its native
+# binary from the GitHub Releases API — authenticate it via the patcher, run
+# it, and fail the build loudly if the binary is still missing.
+RUN node patches/tls-client-postinstall-auth.cjs \
+  && node node_modules/tls-client-node/scripts/postinstall.js \
+  && (test -n "$(find node_modules/tls-client-node/bin -mindepth 1 -print -quit 2>/dev/null)" \
+      || (echo "tls-client-node native binary missing after postinstall — GitHub API fetch likely rate-limited or failed (#7802)" >&2 && exit 1))
+
 RUN --mount=type=cache,id=s/92ca8a61-c1ba-421f-a389-d48ac7258c2d-next-cache,target=/app/.build/next/cache \
   mkdir -p /app/data \
   && npm run build \
