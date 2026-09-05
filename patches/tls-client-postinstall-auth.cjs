@@ -1,16 +1,14 @@
-// Adds an Authorization header (when TLS_CLIENT_GITHUB_TOKEN is set) to the
-// tls-client-node postinstall's GitHub Releases API fetch.
-//
-// Fork-side mitigation for the unauthenticated 60 req/h per-IP rate limit on
-// api.github.com that makes the postinstall fetch flaky on shared CI runners
-// (upstream #7802). The token is the workflow run's own short-lived
-// GITHUB_TOKEN supplied as a build-arg; it is consumed only inside the builder
-// stage and never reaches the final image. When upstream fixes #7802 properly
-// this patcher can be dropped.
+// Fork-side mitigation for upstream #7802: tls-client-node's postinstall
+// fetches its native binary from the GitHub Releases API WITHOUT auth; that
+// endpoint is rate-limited to 60 req/h per IP on shared CI runners and flakes
+// builds. This patcher wires a Bearer token (from the TLS_CLIENT_GITHUB_TOKEN
+// env, provided via buildx secret mount) into the postinstall's fetch. When
+// upstream fixes #7802 properly, drop this patcher.
 const fs = require("fs");
 
 const HDR = JSON.stringify("Authorization");
 const ENVNAME = JSON.stringify("TLS_CLIENT_GITHUB_TOKEN");
+const ENVEXPR = "process.env[" + ENVNAME + "]";
 const p = "node_modules/tls-client-node/scripts/postinstall.js";
 let s = fs.readFileSync(p, "utf8");
 
@@ -25,9 +23,12 @@ if (!s.includes(NEEDLE)) {
   process.exit(1);
 }
 
+// NOTE: the injected expression must be self-contained — it runs inside
+// postinstall.js, which does NOT see this file's constants. The env var name
+// is inlined as a literal via ENVEXPR.
 const extra =
-  "\n            " + HDR + ": process.env[ENVNAME]" +
-  "\n                ? `Bearer ${process.env[ENVNAME]}`" +
+  "\n            " + HDR + ": " + ENVEXPR +
+  "\n                ? `Bearer ${" + ENVEXPR + "}`" +
   "\n                : undefined,";
 
 s = s.replace(NEEDLE, NEEDLE + extra);

@@ -117,11 +117,9 @@ RUN test -f package-lock.json \
 # Fork mitigation for #7802: the tls-client-node postinstall fetches its
 # native binary from the GitHub Releases API WITHOUT auth; on shared CI
 # runners that endpoint is rate-limited to 60 req/h per IP and flakes the
-# build. The workflow passes its own short-lived GITHUB_TOKEN as a build-arg
-# (builder stage only - ARGs do not propagate past this stage, so the
-# published image never contains it).
-ARG TLS_CLIENT_GITHUB_TOKEN=""
-ENV TLS_CLIENT_GITHUB_TOKEN="${TLS_CLIENT_GITHUB_TOKEN}"
+# build. The workflow provides its own short-lived GITHUB_TOKEN via a buildx
+# secret mount consumed by the postinstall RUN below (never persisted in a
+# layer, never reaches the published image).
 RUN --mount=type=cache,id=s/92ca8a61-c1ba-421f-a389-d48ac7258c2d-npm-cache,target=/root/.npm \
   npm ci --include=optional --no-audit --no-fund --legacy-peer-deps --ignore-scripts \
   && (cd node_modules/better-sqlite3 \
@@ -208,7 +206,8 @@ COPY . ./
 # Fork #7802 (continued): the tls-client-node postinstall fetches its native
 # binary from the GitHub Releases API — authenticate it via the patcher, run
 # it, and fail the build loudly if the binary is still missing.
-RUN node patches/tls-client-postinstall-auth.cjs \
+RUN --mount=type=secret,id=github_token,env=TLS_CLIENT_GITHUB_TOKEN \
+  node patches/tls-client-postinstall-auth.cjs \
   && node node_modules/tls-client-node/scripts/postinstall.js \
   && (test -n "$(find node_modules/tls-client-node/bin -mindepth 1 -print -quit 2>/dev/null)" \
       || (echo "tls-client-node native binary missing after postinstall — GitHub API fetch likely rate-limited or failed (#7802)" >&2 && exit 1))

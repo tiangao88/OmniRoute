@@ -60,8 +60,8 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:${{ env.TAG }}
             ${{ env.IMAGE }}:latest-fixed
-          build-args: |
-            TLS_CLIENT_GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
