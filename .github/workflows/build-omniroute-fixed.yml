@@ -1,0 +1,15 @@
+# Build & publish a pinned OmniRoute image from the fixed release branch
+# Purpose: produce our OWN image (ghcr.io/tiangao88/omniroute:3.8.50-fixed)
+# rebased onto the OFFICIAL v3.8.50 tag (2026-09-05) plus our two remaining
+# patches (proxy-name in proxy logs, authz read-only resilience paths).
+# Upstream tag v3.8.50 is NOT an ancestor of the old fork branch — this
+# branch now tracks the official tag directly.
+#
+# Trigger: any push to the `release/v3.8.50` branch of this fork, or manual.
+# Output: GHCR image tagged :3.8.50-fixed and :latest-fixed.
+#
+# NOTE: needs repo `GITHUB_TOKEN` with `packages: write` (default for the
+# workflow below) and the fork/package set public so Coolify can pull it
+# without embedding credentials.
+
+name: Build & Publish OmniRoute (fixed image)
