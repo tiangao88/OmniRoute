@@ -174,10 +174,20 @@ test("empty 200 from first leg falls back to second leg and second leg image is 
   );
 
   assert.equal(response.status, 200, "combo must ultimately succeed via leg 2");
-  const body = (await response.json()) as Array<{ b64_json?: string }>;
-  assert.ok(Array.isArray(body), "response body must be the image items array");
-  assert.equal(body.length, 1, "exactly one image (from the second leg)");
-  assert.equal(body[0]?.b64_json, PNG_B64, "served image must come from leg 2");
+  // Follow-up to #12982: the combo success body is the full OpenAI envelope
+  // ({ created, data: [...] }), not a bare items array.
+  const body = (await response.json()) as {
+    created?: number;
+    data?: Array<{ b64_json?: string }>;
+  };
+  assert.ok(
+    body && typeof body === "object" && !Array.isArray(body),
+    "combo success body must be the OpenAI images envelope, not a bare array"
+  );
+  assert.ok(typeof body.created === "number", "envelope must carry a created timestamp");
+  assert.ok(Array.isArray(body.data), "envelope must carry a data items array");
+  assert.equal(body.data?.length, 1, "exactly one image (from the second leg)");
+  assert.equal(body.data?.[0]?.b64_json, PNG_B64, "served image must come from leg 2");
 
   // Both legs were tried: first the empty-200 stub, then the valid stub.
   assert.equal(hits.length, 2, "combo must advance to the second leg");
@@ -233,8 +243,9 @@ test("valid first-leg response does not invoke later legs", async () => {
   );
 
   assert.equal(response.status, 200);
-  const body = (await response.json()) as Array<{ b64_json?: string }>;
-  assert.equal(body[0]?.b64_json, PNG_B64);
+  const body = (await response.json()) as { data?: Array<{ b64_json?: string }> };
+  assert.equal(body.data?.[0]?.b64_json, PNG_B64, "success body must be the OpenAI envelope");
+  assert.ok(!Array.isArray(body), "success body must not be a bare items array");
   assert.equal(hits.length, 1, "first leg success must stop the combo (no later legs hit)");
   assert.equal(hits[0].model, "openai/gpt-5-image-mini");
 });
