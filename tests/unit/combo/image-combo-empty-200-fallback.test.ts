@@ -174,10 +174,10 @@ test("empty 200 from first leg falls back to second leg and second leg image is 
   );
 
   assert.equal(response.status, 200, "combo must ultimately succeed via leg 2");
-  const body = (await response.json()) as Array<{ b64_json?: string }>;
-  assert.ok(Array.isArray(body), "response body must be the image items array");
-  assert.equal(body.length, 1, "exactly one image (from the second leg)");
-  assert.equal(body[0]?.b64_json, PNG_B64, "served image must come from leg 2");
+  const body = (await response.json()) as { data?: Array<{ b64_json?: string }> };
+  assert.ok(Array.isArray(body.data), "response body must carry the image items array");
+  assert.equal(body.data?.length, 1, "exactly one image (from the second leg)");
+  assert.equal(body.data?.[0]?.b64_json, PNG_B64, "served image must come from leg 2");
 
   // Both legs were tried: first the empty-200 stub, then the valid stub.
   assert.equal(hits.length, 2, "combo must advance to the second leg");
@@ -233,8 +233,8 @@ test("valid first-leg response does not invoke later legs", async () => {
   );
 
   assert.equal(response.status, 200);
-  const body = (await response.json()) as Array<{ b64_json?: string }>;
-  assert.equal(body[0]?.b64_json, PNG_B64);
+  const body = (await response.json()) as { data?: Array<{ b64_json?: string }> };
+  assert.equal(body.data?.[0]?.b64_json, PNG_B64);
   assert.equal(hits.length, 1, "first leg success must stop the combo (no later legs hit)");
   assert.equal(hits[0].model, "openai/gpt-5-image-mini");
 });
