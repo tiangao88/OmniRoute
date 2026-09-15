@@ -1,5 +1,5 @@
 /**
- * Image combo fallback on empty 2xx upstream responses (#10199)
+ * Image combo fallback on empty 2xx upstream responses
  *
  * Repro: an OpenAI-compatible image provider (e.g. openrouter/*) can return
  * HTTP 200 with an empty or malformed image payload (no usable b64_json/url in
@@ -16,7 +16,7 @@
  *
  * Run: node --import tsx/esm --import ./open-sse/utils/setupPolyfill.ts
  *        --import ./tests/_setup/isolateDataDir.ts --test
- *        tests/unit/combo/image-combo-empty-200-fallback-10199.test.ts
+ *        tests/unit/combo/image-combo-empty-200-fallback.test.ts
  */
 import test from "node:test";
 import assert from "node:assert/strict";

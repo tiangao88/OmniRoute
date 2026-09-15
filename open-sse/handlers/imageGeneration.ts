@@ -2914,7 +2914,7 @@ async function fetchImageEndpoint(url, headers, body, provider, log) {
     // Normalize response to OpenAI format
     const items = Array.isArray(data?.data) ? data.data : [];
 
-    // #10199: some providers return HTTP 2xx with an empty or malformed image
+    // Some providers return HTTP 2xx with an empty or malformed image
     // payload (empty data array, missing/blank b64_json and url). Treating that
     // as success makes image-combo strategies stop on the first leg and hand an
     // image-less 200 to the client. Require at least one usable image item and
