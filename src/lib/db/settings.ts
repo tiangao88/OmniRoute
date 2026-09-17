@@ -238,7 +238,11 @@ export async function getSettings() {
     // Settings UI; the change hot-reloads through `applyRuntimeSettings` →
     // `applyAuthzBypassSection` → `getAuthzBypassSnapshot()`.
     localOnlyManageScopeBypassEnabled: true,
-    localOnlyManageScopeBypassPrefixes: ["/api/mcp/"],
+    localOnlyManageScopeBypassPrefixes: [
+      "/api/mcp/",
+      "/api/resilience/connections",
+      "/dashboard/resilience/connections",
+    ],
     customBannedSignals: [],
     autoDisableBannedScope: "all",
     proxyEnabled: true,
