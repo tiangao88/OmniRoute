@@ -464,6 +464,30 @@ test("aborting the client signal stops the keepalive stream (#2544)", async () =
   assert.equal(await Promise.race([drained, timed]), true, "stream should close after abort");
 });
 
+test("withDeadlineSignal accepts a proxied Request and preserves its body", async () => {
+  const body = JSON.stringify({ model: "pmoc-main" });
+  const original = new Request("http://localhost/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+  });
+  // Next-style request proxies can expose the target's getters but remain unsafe
+  // to pass directly to Node's `new Request(proxy)` constructor.
+  const proxied = new Proxy(original, {
+    get(target, key) {
+      return Reflect.get(target, key, target);
+    },
+  }) as Request;
+
+  const { wrappedReq, deadlineController } = withDeadlineSignal(proxied);
+  assert.equal(wrappedReq.url, original.url);
+  assert.equal(wrappedReq.method, "POST");
+  assert.equal(wrappedReq.headers.get("content-type"), "application/json");
+  assert.equal(await wrappedReq.text(), body);
+  deadlineController.abort();
+  assert.equal(wrappedReq.signal.aborted, true);
+});
+
 // Last-resort slow-path deadline: a handler that never resolves must not hold the
 // client stream forever. At slowPathDeadlineMs the wrapper aborts the internal
 // deadline controller (observable here because the test wires the helper-built
