@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
-      IMAGE: ghcr.io/tiangao88/omniroute@sha256:269de3ad765f3e32e105eb405e859537b0c87765cc2f7b139e318606e74f2eec
+      IMAGE: ghcr.io/tiangao88/omniroute@sha256:29f93bcf8f33668a33c6a8fa54ba999fd5308a158e1201724d637a0f6f720d21
       CONTAINER: omniroute-house-image-smoke
     steps:
       - name: Pull exact public image and boot with no network or production data
