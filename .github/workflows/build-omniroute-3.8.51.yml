@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 12
     env:
       IMAGE: ghcr.io/tiangao88/omniroute@${{ inputs.image_digest }}
-      SOURCE_COMMIT: 6420fec4692511a5ea6938cd5b8f226614b86fa6
+      SOURCE_COMMIT: 40da63dedabc07ff248299633f2cf1dd0568c9e0
       CONTAINER: omniroute-house-image-smoke
     steps:
       - name: Pull exact public image and boot with no network or production data
