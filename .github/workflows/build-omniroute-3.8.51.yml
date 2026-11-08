@@ -1,0 +1,106 @@
+# Verification phase for the reviewed house media-cost candidate.
+# This deliberately reuses a dispatchable workflow path from the default branch;
+# nothing is installed or deployed on an operator or production server.
+name: Verify OmniRoute house media accounting image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_digest:
+        description: Exact published image digest
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-house-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      IMAGE: ghcr.io/tiangao88/omniroute@${{ inputs.image_digest }}
+      SOURCE_COMMIT: 6420fec4692511a5ea6938cd5b8f226614b86fa6
+      CONTAINER: omniroute-house-image-smoke
+    steps:
+      - name: Pull exact public image and boot with no network or production data
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE" =~ ^ghcr\.io/tiangao88/omniroute@sha256:[0-9a-f]{64}$ ]]
+          docker pull "$IMAGE"
+          docker image inspect "$IMAGE" --format '{{json .RepoDigests}}'
+          docker run -d --name "$CONTAINER" --network none \
+            --memory 1536m --cpus 2 --pids-limit 512 \
+            --tmpfs /app/data:rw,nosuid,nodev,size=128m,uid=1000,gid=1000 \
+            -e NEXT_TELEMETRY_DISABLED=1 "$IMAGE"
+      - name: Verify boot, shipped healthcheck, native SQLite and CLI pin
+        shell: python
+        run: |
+          import json, os, subprocess, time, pathlib
+          container = os.environ['CONTAINER']
+          report = {'image': os.environ['IMAGE'], 'sourceCommit': os.environ['SOURCE_COMMIT'], 'network': 'none', 'data': 'fresh tmpfs', 'checks': []}
+          def run(args, allow_fail=False):
+              p = subprocess.run(args, text=True, capture_output=True, timeout=25)
+              if not allow_fail and p.returncode:
+                  raise RuntimeError('Command failed: ' + ' '.join(args) + '; rc=' + str(p.returncode) + '; ' + p.stderr[-1500:])
+              return p
+          def node(code):
+              return run(['docker', 'exec', container, 'node', '--input-type=module', '-e', code])
+          def record(name, details):
+              report['checks'].append({'name': name, 'result': 'pass', 'details': details})
+              pathlib.Path('smoke-report.json').write_text(json.dumps(report, indent=2))
+              print(json.dumps(report['checks'][-1]))
+          code = "const r=await fetch('http://127.0.0.1:20128/healthz',{signal:AbortSignal.timeout(4000)}); console.log(JSON.stringify({status:r.status,body:await r.text()}));"
+          for attempt in range(45):
+              p = run(['docker', 'exec', container, 'node', '--input-type=module', '-e', code], allow_fail=True)
+              if not p.returncode:
+                  health = json.loads(p.stdout)
+                  if health['status'] == 200 and health['body'] == 'ok\n':
+                      break
+              state = json.loads(run(['docker', 'inspect', container, '--format', '{{json .State}}']).stdout)
+              if not state['Running']:
+                  raise RuntimeError('Container exited; state=' + json.dumps(state))
+              time.sleep(3)
+          else:
+              raise RuntimeError('Published image did not become ready')
+          record('GET /healthz', health)
+          run(['docker', 'exec', container, 'node', 'healthcheck.mjs'])
+          record('shipped healthcheck', 'exit 0')
+          # Ensure the shipped checker rejects a deliberately wrong endpoint.
+          negative = run(['docker', 'exec', '-e', 'OMNIROUTE_HEALTHCHECK_PATH=/__missing_smoke_endpoint__', container, 'node', 'healthcheck.mjs'], allow_fail=True)
+          assert negative.returncode != 0, 'Healthcheck accepted missing endpoint'
+          record('negative healthcheck guard', {'exit_code': negative.returncode})
+          native = node("import {createRequire} from 'node:module'; const require=createRequire('/app/package.json'); const Database=require('better-sqlite3'); const db=new Database(':memory:'); console.log(JSON.stringify({node:process.version,sqlite:db.prepare('select sqlite_version() as version').get().version})); db.close();")
+          record('native SQLite binding', json.loads(native.stdout))
+          version = node("import fs from 'node:fs'; const p=JSON.parse(fs.readFileSync('/usr/local/lib/node_modules/@openai/codex/package.json','utf8')); if(p.version!=='0.165.0') throw new Error('Wrong Codex pin: '+p.version); console.log(JSON.stringify({codex:p.version}));")
+          record('Codex CLI pin', json.loads(version.stdout))
+          auth = node("const r=await fetch('http://127.0.0.1:20128/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'__smoke_only__',messages:[{role:'user',content:'smoke'}]}),signal:AbortSignal.timeout(8000)}); if(r.status!==401 && r.status!==403) throw new Error('Expected auth rejection, got '+r.status); console.log(JSON.stringify({status:r.status}));")
+          record('unauthenticated LLM request rejected', json.loads(auth.stdout))
+          billing = node("import fs from 'node:fs'; import {createRequire} from 'node:module'; const require=createRequire('/app/package.json'); const Database=require('better-sqlite3'); const pkg=JSON.parse(fs.readFileSync('/app/package.json','utf8')); if(pkg.version!=='3.8.53') throw new Error('Wrong application version'); if(!fs.existsSync('/app/migrations/228_usage_history_calculated_cost.sql')) throw new Error('Missing billing migration'); const db=new Database('/app/data/storage.sqlite',{readonly:true}); const columns=db.prepare('PRAGMA table_info(usage_history)').all().map(r=>r.name); const expected=['calculated_cost_usd','billing_unit','billing_quantity','billing_unit_price_usd']; if(expected.some(c=>!columns.includes(c))) throw new Error('Billing columns absent'); const migration=db.prepare('SELECT version,name FROM _omniroute_migrations WHERE version = ?').get('228'); if(!migration) throw new Error('Billing migration not applied'); console.log(JSON.stringify({version:pkg.version,node:process.version,columns:expected,migration})); db.close();")
+          record('application version and document-billing migration', json.loads(billing.stdout))
+          compiled = node("import fs from 'node:fs'; import path from 'node:path'; const wanted=['X-OmniRoute-Cost-Status','Billing persistence failed','/api/v1/generation']; const found=new Set(); function scan(dir){ if(!fs.existsSync(dir))return; for(const e of fs.readdirSync(dir,{withFileTypes:true})){ if(found.size===wanted.length)return; const p=path.join(dir,e.name); if(e.isDirectory())scan(p); else if(e.isFile() && /\\.m?js$/.test(e.name)){const s=fs.readFileSync(p,'utf8');for(const v of wanted)if(s.includes(v))found.add(v);}}} scan('/app/.next/server');scan('/app/.build/next/server');if(found.size!==wanted.length)throw new Error('Compiled media accounting markers absent');console.log(JSON.stringify({markers:[...found]}));")
+          record('compiled media accounting implementation', json.loads(compiled.stdout))
+          for _ in range(12):
+              state = json.loads(run(['docker', 'inspect', container, '--format', '{{json .State}}']).stdout)
+              if state.get('Health', {}).get('Status') == 'healthy':
+                  break
+              time.sleep(5)
+          assert state['Running'] and state.get('Health', {}).get('Status') == 'healthy', 'Docker did not mark image healthy'
+          record('Docker HEALTHCHECK state', {'running': state['Running'], 'health': state['Health']['Status'], 'oom_killed': state['OOMKilled']})
+          report['result'] = 'pass'
+          pathlib.Path('smoke-report.json').write_text(json.dumps(report, indent=2))
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: house-image-smoke-report
+          path: smoke-report.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Remove only the disposable test container
+        if: always()
+        run: docker rm -f "$CONTAINER" || true
