@@ -1,7 +1,7 @@
-# Verification phase for the reviewed house media-cost candidate.
+# Verification phase for the reviewed house tool-choice candidate.
 # This deliberately reuses a dispatchable workflow path from the default branch;
 # nothing is installed or deployed on an operator or production server.
-name: Verify OmniRoute house media accounting image
+name: Verify OmniRoute house tool-choice image
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 12
     env:
       IMAGE: ghcr.io/tiangao88/omniroute@${{ inputs.image_digest }}
-      SOURCE_COMMIT: 40da63dedabc07ff248299633f2cf1dd0568c9e0
+      SOURCE_COMMIT: 264efd1c93303fb5874aa70bf30c9e83a1f77310
       CONTAINER: omniroute-house-image-smoke
     steps:
       - name: Pull exact public image and boot with no network or production data
