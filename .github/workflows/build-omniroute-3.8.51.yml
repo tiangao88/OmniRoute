@@ -1,7 +1,7 @@
 # Verification phase for the reviewed house tool-choice candidate.
 # This deliberately reuses a dispatchable workflow path from the default branch;
 # nothing is installed or deployed on an operator or production server.
-name: Verify OmniRoute house tool-choice image
+name: Verify OmniRoute house Paris reporting image
 
 on:
   workflow_dispatch:
@@ -24,8 +24,8 @@ jobs:
     timeout-minutes: 12
     env:
       IMAGE: ghcr.io/tiangao88/omniroute@${{ inputs.image_digest }}
-      SOURCE_COMMIT: 264efd1c93303fb5874aa70bf30c9e83a1f77310
-      CONTAINER: omniroute-house-image-smoke
+      SOURCE_COMMIT: 3e14bbb6b97131b9a0bd93074e437b92a826ac06
+      CONTAINER: omniroute-house-paris-image-smoke
     steps:
       - name: Pull exact public image and boot with no network or production data
         run: |
@@ -84,6 +84,29 @@ jobs:
           record('application version and document-billing migration', json.loads(billing.stdout))
           compiled = node("import fs from 'node:fs'; import path from 'node:path'; const wanted=['X-OmniRoute-Cost-Status','Billing persistence failed','/api/v1/generation']; const found=new Set(); function scan(dir){ if(!fs.existsSync(dir))return; for(const e of fs.readdirSync(dir,{withFileTypes:true})){ if(found.size===wanted.length)return; const p=path.join(dir,e.name); if(e.isDirectory())scan(p); else if(e.isFile() && /\\.m?js$/.test(e.name)){const s=fs.readFileSync(p,'utf8');for(const v of wanted)if(s.includes(v))found.add(v);}}} scan('/app/.next/server');scan('/app/.build/next/server');if(found.size!==wanted.length)throw new Error('Compiled media accounting markers absent');console.log(JSON.stringify({markers:[...found]}));")
           record('compiled media accounting implementation', json.loads(compiled.stdout))
+          # Synthetic rows and a read-only token exist only in this network-none
+          # disposable tmpfs. No production key, model or database is used.
+          paris = node("""
+          import {createRequire} from 'node:module';
+          import {randomBytes,randomUUID,createHash} from 'node:crypto';
+          const require=createRequire('/app/package.json'),Database=require('better-sqlite3');
+          const db=new Database('/app/data/storage.sqlite');
+          const token='oma_live_'+randomBytes(32).toString('base64url');
+          db.prepare('INSERT INTO cli_access_tokens (id,token_hash,token_prefix,name,scope,created_at) VALUES (?,?,?,?,?,?)').run('tok_'+randomUUID(),createHash('sha256').update(token).digest('hex'),token.slice(0,12),'isolated-paris-smoke','read',new Date().toISOString());
+          const insert=db.prepare('INSERT INTO usage_history (timestamp,provider,model,tokens_input,tokens_output,success,calculated_cost_usd) VALUES (?,?,?,?,?,?,?)');
+          for(const stamp of ['2026-01-31T23:30:00.000Z','2026-07-31T22:30:00.000Z','2026-03-29T22:30:00.000Z','2026-10-25T22:30:00.000Z'])insert.run(stamp,'fixture','paris-fixture',10,5,1,1);
+          db.close();
+          const cases=[['2026-01-31','2026-02-02','2026-02-01'],['2026-07-31','2026-08-02','2026-08-01'],['2026-03-29','2026-03-31','2026-03-30'],['2026-10-25','2026-10-27','2026-10-25']];
+          for(const [start,end,day] of cases){
+            const query=new URLSearchParams({startDate:start+'T00:00:00Z',endDate:end+'T00:00:00Z',timeZone:'Europe/Paris',includeFlatRateEstimates:'false'});
+            const r=await fetch('http://127.0.0.1:20128/api/usage/analytics?'+query,{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(8000)});
+            if(r.status!==200)throw Error('Paris HTTP status '+r.status);
+            const b=await r.json();
+            if(b.reporting?.version!==1||b.reporting.timeZone!=='Europe/Paris'||b.dailyTrend.length!==1||b.dailyTrend[0].date!==day||b.dailyTrend[0].requests!==1||b.dailyTrend[0].cost!==1)throw Error('Paris calendar/cost mismatch');
+          }
+          console.log(JSON.stringify({readScope:true,calendarCases:cases.length,includesWinterSummerAndBothDstTransitions:true,data:'synthetic-tmpfs-only'}));
+          """)
+          record('native SQLite Paris HTTP reporting', json.loads(paris.stdout))
           for _ in range(12):
               state = json.loads(run(['docker', 'inspect', container, '--format', '{{json .State}}']).stdout)
               if state.get('Health', {}).get('Status') == 'healthy':

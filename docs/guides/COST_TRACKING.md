@@ -1,7 +1,7 @@
 ---
 title: "Cost & Spend Tracking"
 version: 3.8.53
-lastUpdated: 2026-11-08
+lastUpdated: 2026-11-09
 ---
 
 # Cost & Spend Tracking
@@ -39,6 +39,22 @@ Because the number is an estimate:
 ---
 
 ## How costs are estimated
+
+### Reporting time zones
+
+`GET /api/usage/analytics` defaults to UTC. Set `timeZone=Europe/Paris`
+with explicit `startDate` and `endDate` ISO instants to report Paris calendar
+days. The finite window must not exceed 366 days. Daily costs, requests and
+tokens, the activity heatmap and weekday patterns use the same IANA
+daylight-saving rules. No global process time zone, stored timestamp, currency,
+schema or inference route is changed. Existing UTC clients keep their behavior.
+
+The response includes `reporting.version: 1`, `reporting.timeZone`,
+`reporting.rawHistoryCutoffDate` and `reporting.summarizedHistoryExcluded`.
+Older `daily_usage_summary` rows represent UTC days and cannot be accurately
+rebucketed. Paris reports therefore use timestamped raw history only and flag
+overlapping excluded summaries; UTC remains available for those older totals.
+This is not a promise of complete historical coverage. Costs remain USD.
 
 ### The pricing source
 

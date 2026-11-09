@@ -4302,6 +4302,19 @@ paths:
       tags: [Usage]
       summary: Get usage analytics
       parameters:
+        - name: timeZone
+          in: query
+          description: >-
+            Calendar grouping zone. Paris requires a finite startDate/endDate
+            window of at most 366 days (the default bounded range also works).
+            Uses IANA daylight-saving rules for daily cost/token/request buckets,
+            heatmap and weekday patterns. Paris excludes older UTC-only summaries;
+            inspect reporting.summarizedHistoryExcluded for coverage loss.
+            The response advertises reporting.version=1 and reporting.timeZone.
+          schema:
+            type: string
+            enum: [UTC, Europe/Paris]
+            default: UTC
         - name: period
           in: query
           schema:
