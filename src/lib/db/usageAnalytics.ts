@@ -12,6 +12,7 @@
 import { getDbInstance } from "./core";
 import { rawCostSums } from "./usageAnalytics/billing";
 import type { AnalyticsParams } from "./usageAnalytics/sources";
+import { reportingDaySql, type ReportingTimeOptions } from "./usageAnalytics/reportingTime";
 
 export { buildUnifiedSource, buildPresetUnifiedSource } from "./usageAnalytics/sources";
 export type {
@@ -117,19 +118,24 @@ export interface DailyUsageRow {
 /**
  * Daily request + token counts aggregated from the unified source CTE.
  */
-export function getDailyUsage(unifiedSource: string, params: AnalyticsParams): DailyUsageRow[] {
+export function getDailyUsage(
+  unifiedSource: string,
+  params: AnalyticsParams,
+  reporting?: ReportingTimeOptions
+): DailyUsageRow[] {
   const db = getDbInstance();
+  const day = reportingDaySql(reporting);
   return db
     .prepare(
       `
       SELECT
-        DATE(timestamp) as date,
+        ${day} as date,
         COALESCE(SUM(requests), 0) as requests,
         COALESCE(SUM(tokens_input), 0) as promptTokens,
         COALESCE(SUM(tokens_output), 0) as completionTokens,
         COALESCE(SUM(tokens_input + tokens_output), 0) as totalTokens
       FROM ${unifiedSource} AS _u
-      GROUP BY DATE(timestamp)
+      GROUP BY ${day}
       ORDER BY date ASC
     `
     )
@@ -155,13 +161,18 @@ export interface DailyCostRow extends CostTokenFields {
 /**
  * Per-day, per-provider, per-model token breakdown for cost calculation.
  */
-export function getDailyCostRows(unifiedSource: string, params: AnalyticsParams): DailyCostRow[] {
+export function getDailyCostRows(
+  unifiedSource: string,
+  params: AnalyticsParams,
+  reporting?: ReportingTimeOptions
+): DailyCostRow[] {
   const db = getDbInstance();
+  const day = reportingDaySql(reporting);
   return db
     .prepare(
       `
       SELECT
-        DATE(timestamp) as date,
+        ${day} as date,
         LOWER(provider) as provider,
         LOWER(model) as model,
         COALESCE(NULLIF(service_tier, ''), 'standard') as serviceTier,
@@ -174,7 +185,7 @@ export function getDailyCostRows(unifiedSource: string, params: AnalyticsParams)
         MAX(is_aggregated) as isAggregated,
         ${UNIFIED_COST_TOKEN_SUMS}
       FROM ${unifiedSource} AS _u
-      GROUP BY DATE(timestamp), LOWER(provider), LOWER(model), serviceTier
+      GROUP BY ${day}, LOWER(provider), LOWER(model), serviceTier
       ORDER BY date ASC
     `
     )
@@ -196,17 +207,22 @@ export interface HeatmapRow {
  * @param heatmapConditions - Array of SQL condition strings (combined with AND).
  * @param params            - Named params referenced inside the conditions.
  */
-export function getHeatmapRows(heatmapConditions: string[], params: AnalyticsParams): HeatmapRow[] {
+export function getHeatmapRows(
+  heatmapConditions: string[],
+  params: AnalyticsParams,
+  reporting?: ReportingTimeOptions
+): HeatmapRow[] {
   const db = getDbInstance();
+  const day = reportingDaySql(reporting);
   return db
     .prepare(
       `
       SELECT
-        DATE(timestamp) as date,
+        ${day} as date,
         COALESCE(SUM(tokens_input + tokens_output), 0) as totalTokens
       FROM usage_history
       WHERE ${heatmapConditions.join(" AND ")}
-      GROUP BY DATE(timestamp)
+      GROUP BY ${day}
       ORDER BY date ASC
     `
     )
@@ -728,9 +744,11 @@ export interface WeeklyPatternRow {
  */
 export function getWeeklyPatternRows(
   unifiedSource: string,
-  params: AnalyticsParams
+  params: AnalyticsParams,
+  reporting?: ReportingTimeOptions
 ): WeeklyPatternRow[] {
   const db = getDbInstance();
+  const day = reportingDaySql(reporting);
   return db
     .prepare(
       `
@@ -741,18 +759,32 @@ export function getWeeklyPatternRows(
         COALESCE(SUM(totalTokens), 0) as totalTokens
       FROM (
         SELECT
-          DATE(timestamp) as date,
-          strftime('%w', timestamp) as dayOfWeek,
+          ${day} as date,
+          strftime('%w', ${day}) as dayOfWeek,
           COALESCE(SUM(requests), 0) as requests,
           COALESCE(SUM(tokens_input + tokens_output), 0) as totalTokens
         FROM ${unifiedSource} AS _u
-        GROUP BY DATE(timestamp), strftime('%w', timestamp)
+        GROUP BY ${day}, strftime('%w', ${day})
       )
       GROUP BY dayOfWeek
       ORDER BY dayOfWeek ASC
     `
     )
     .all(params) as WeeklyPatternRow[];
+}
+
+/** Presence only: UTC daily summaries cannot be assigned to local-midnight days. */
+export function hasUtcSummaryHistory(
+  sinceIso: string,
+  untilIso: string,
+  rawCutoffDate: string
+): boolean {
+  const row = getDbInstance()
+    .prepare<{ present: number }>(
+      "SELECT 1 AS present FROM daily_usage_summary WHERE date >= ? AND date <= ? AND date < ? LIMIT 1"
+    )
+    .get(sinceIso.slice(0, 10), untilIso.slice(0, 10), rawCutoffDate);
+  return row?.present === 1;
 }
 
 // ---------------------------------------------------------------------------

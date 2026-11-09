@@ -1,0 +1,36 @@
+name: House Paris reporting regressions
+on:
+  pull_request:
+    branches: [house/v3.8.53-paris-reporting]
+permissions:
+  contents: read
+concurrency:
+  group: paris-reporting-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  test:
+    name: ${{ matrix.suite }}
+    if: github.repository == 'tiangao88/OmniRoute'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [test:unit, test:vitest, check:docs-all]
+    env:
+      ONNXRUNTIME_NODE_INSTALL: skip
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26.12.1"
+          cache: npm
+      - run: npm ci --include=optional --legacy-peer-deps --no-audit --no-fund
+      - run: npm run "${SUITE}"
+        env:
+          SUITE: ${{ matrix.suite }}

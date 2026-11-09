@@ -13,6 +13,8 @@ export type AnalyticsParams = Record<string, string>;
 // ---------------------------------------------------------------------------
 
 export interface BuildUnifiedSourceOptions {
+  /** Timestamped records only; UTC daily summaries cannot be rebucketed. */
+  rawOnly?: boolean;
   /** ISO-8601 timestamp lower bound (e.g. "2024-01-01T00:00:00.000Z"). Null = all time. */
   sinceIso: string | null;
   /** ISO-8601 timestamp upper bound. Null = no upper bound. */
@@ -77,7 +79,8 @@ export function buildUnifiedSource(opts: BuildUnifiedSourceOptions): UnifiedSour
   const sinceDate = sinceIso?.split("T")[0] ?? null;
 
   // Include summaries only when the window starts before rawCutoffDate and no api_key filter is active.
-  const needsAggregated = (!sinceDate || sinceDate < rawCutoffDate) && !apiKeyWhere;
+  const needsAggregated =
+    !opts.rawOnly && (!sinceDate || sinceDate < rawCutoffDate) && !apiKeyWhere;
 
   const unifiedParams: AnalyticsParams = {};
 
@@ -185,7 +188,8 @@ export function buildPresetUnifiedSource(opts: BuildUnifiedSourceOptions): Unifi
   const { sinceIso, untilIso, rawCutoffDate, apiKeyWhere, apiKeyParams } = opts;
   const sinceDate = sinceIso?.split("T")[0] ?? null;
 
-  const needsAggregated = (!sinceDate || sinceDate < rawCutoffDate) && !apiKeyWhere;
+  const needsAggregated =
+    !opts.rawOnly && (!sinceDate || sinceDate < rawCutoffDate) && !apiKeyWhere;
 
   const presetParams: AnalyticsParams = {};
 

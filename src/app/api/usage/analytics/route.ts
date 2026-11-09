@@ -6,6 +6,11 @@ import { serveAnalyticsCached } from "@/lib/usage/analyticsResponseCache";
 import { getApiKeys } from "@/lib/db/apiKeys";
 import { getUserDatabaseSettings } from "@/lib/db/databaseSettings";
 import {
+  reportingTimeZoneSchema,
+  reportingDate,
+  validParisWindow,
+} from "@/lib/db/usageAnalytics/reportingTime";
+import {
   buildUnifiedSource,
   buildPresetUnifiedSource,
   getUsageSummary,
@@ -24,6 +29,7 @@ import {
   getApiKeyMetadataRows,
   getWeeklyPatternRows,
   getPresetCostModelRows,
+  hasUtcSummaryHistory,
 } from "@/lib/db/usageAnalytics";
 import { getFallbackStats, getErrorTypeBreakdown } from "@/lib/db/callLogStats";
 import { buildByProviderRows } from "@/lib/usage/providerDisplayNames";
@@ -486,8 +492,8 @@ function formatUtcDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-function computeActivityStreak(activityMap: Record<string, number>): number {
-  const cursor = new Date();
+function computeActivityStreak(activityMap: Record<string, number>, timeZone = "UTC"): number {
+  const cursor = new Date(reportingDate(new Date(), timeZone) + "T12:00:00.000Z");
   let streak = 0;
 
   while ((activityMap[formatUtcDate(cursor)] || 0) > 0) {
@@ -521,6 +527,11 @@ async function computeAnalyticsResponse(
 ): Promise<Response> {
   try {
     const { searchParams } = new URL(request.url);
+    const zoneResult = reportingTimeZoneSchema.safeParse(searchParams.get("timeZone") ?? "UTC");
+    if (!zoneResult.success || searchParams.getAll("timeZone").length > 1) {
+      return NextResponse.json({ error: "Invalid reporting time zone" }, { status: 400 });
+    }
+    const timeZone = zoneResult.data;
     const range = searchParams.get("range") || "30d";
     const startDate = searchParams.get("startDate") || undefined;
     const endDate = searchParams.get("endDate") || undefined;
@@ -533,6 +544,17 @@ async function computeAnalyticsResponse(
 
     const sinceIso = startDate || getRangeStartIso(range);
     const untilIso = endDate || null;
+    const reporting = {
+      timeZone,
+      sinceIso: sinceIso ?? null,
+      untilIso: untilIso ?? new Date().toISOString(),
+    };
+    if (timeZone !== "UTC" && !validParisWindow(reporting.sinceIso, reporting.untilIso)) {
+      return NextResponse.json(
+        { error: "Paris reporting requires a valid finite window of at most 366 days" },
+        { status: 400 }
+      );
+    }
     const presetsParam = searchParams.get("presets");
 
     const apiKeys = await getApiKeys();
@@ -589,6 +611,7 @@ async function computeAnalyticsResponse(
       rawCutoffDate,
       apiKeyWhere,
       apiKeyParams: apiKeyParamEntries,
+      rawOnly: timeZone !== "UTC",
     });
 
     // Fetch pricing data for cost calculation (no rows loaded)
@@ -643,10 +666,11 @@ async function computeAnalyticsResponse(
       unknown
     >;
 
-    const dailyRows = getDailyUsage(unifiedSource, unifiedParams);
-    const dailyCostRows = getDailyCostRows(unifiedSource, unifiedParams);
+    const dailyRows = getDailyUsage(unifiedSource, unifiedParams, reporting);
+    const dailyCostRows = getDailyCostRows(unifiedSource, unifiedParams, reporting);
 
-    const heatmapStart = new Date();
+    const heatmapEnd = timeZone === "UTC" ? new Date() : new Date(reporting.untilIso);
+    const heatmapStart = new Date(heatmapEnd);
     heatmapStart.setUTCDate(heatmapStart.getUTCDate() - 364);
     // Custom date range might need a wider heatmap window
     if (startDate) {
@@ -660,13 +684,21 @@ async function computeAnalyticsResponse(
     const heatmapConditions = ["timestamp >= @heatmapStart"];
     if (apiKeyWhere) heatmapConditions.push(apiKeyWhere);
     const heatmapParams: Record<string, string> = { heatmapStart: heatmapStart.toISOString() };
+    if (timeZone !== "UTC") {
+      heatmapConditions.push("timestamp <= @heatmapUntil");
+      heatmapParams.heatmapUntil = reporting.untilIso;
+    }
     if (apiKeyIds.length > 0) {
       apiKeyIds.forEach((key, i) => {
         heatmapParams[`apiKey${i}`] = key;
       });
     }
 
-    const heatmapRows = getHeatmapRows(heatmapConditions, heatmapParams);
+    const heatmapRows = getHeatmapRows(heatmapConditions, heatmapParams, {
+      timeZone,
+      sinceIso: heatmapStart.toISOString(),
+      untilIso: heatmapEnd.toISOString(),
+    });
 
     const modelRows = getModelUsageRows(unifiedSource, unifiedParams);
 
@@ -702,7 +734,7 @@ async function computeAnalyticsResponse(
       apiKeyMetadata.set(groupKey, existing);
     }
 
-    const weeklyRows = getWeeklyPatternRows(unifiedSource, unifiedParams);
+    const weeklyRows = getWeeklyPatternRows(unifiedSource, unifiedParams, reporting);
 
     const fallbackRow = getFallbackStats(whereClause, params) as unknown as Record<string, unknown>;
     const errorBreakdown = getErrorTypeBreakdown(whereClause, params);
@@ -804,7 +836,7 @@ async function computeAnalyticsResponse(
     for (const row of heatmapRows) {
       activityMap[row.date as string] = Number(row.totalTokens);
     }
-    summary.streak = computeActivityStreak(activityMap);
+    summary.streak = computeActivityStreak(activityMap, timeZone);
 
     const modelMap = new Map<string, Record<string, unknown>>();
     for (const row of modelRows) {
@@ -1100,6 +1132,15 @@ async function computeAnalyticsResponse(
       }));
 
     const analytics = {
+      reporting: {
+        version: 1,
+        timeZone,
+        rawHistoryCutoffDate: rawCutoffDate,
+        summarizedHistoryExcluded:
+          timeZone !== "UTC" &&
+          !apiKeyWhere &&
+          hasUtcSummaryHistory(reporting.sinceIso!, reporting.untilIso, rawCutoffDate),
+      },
       summary,
       dailyTrend,
       activityMap,
@@ -1141,6 +1182,7 @@ async function computeAnalyticsResponse(
           rawCutoffDate,
           apiKeyWhere,
           apiKeyParams: apiKeyParamEntries,
+          rawOnly: timeZone !== "UTC",
         });
 
         const presetModelRows = getPresetCostModelRows(pSrc, pParams);
