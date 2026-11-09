@@ -391,6 +391,8 @@ function computeUsageRowCost(
   // Billed-cost views show flat-rate providers as $0, whatever was stored.
   if (flatRateAsZero && isFlatRateProvider(provider)) return 0;
   if (isAggregated) {
+    // Retention drops endpoint detail; preserve the recorded Cortecs snapshot.
+    if (provider.trim().toLowerCase() === "cortecs") return storedCost;
     // New rollups preserve the exact API-equivalent value calculated before
     // cache/reasoning token dimensions are discarded. Legacy zero-cost rows
     // fall through to the best available input/output-token estimate.

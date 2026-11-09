@@ -8,6 +8,7 @@
  * configured (mirrors `normalizeLimitUsd` in `apiKeyUsageLimits.ts`).
  */
 import { getDbInstance } from "./core";
+import { unpricedCortecsRerankSql } from "./usageCostSql";
 
 const LIMITED_KEY_SQL = `k.usage_limit_enabled = 1
   AND (COALESCE(k.daily_usage_limit_usd, 0) > 0 OR COALESCE(k.weekly_usage_limit_usd, 0) > 0)`;
@@ -20,6 +21,7 @@ export interface UsageModelGroupRow {
   apiKeys: number;
   limitedApiKeys: number;
   lastSeenAt: string | null;
+  unpricedRerankRequests?: number;
 }
 
 /**
@@ -38,7 +40,8 @@ export function getSuccessfulUsageModelGroupsSince(sinceIso: string): UsageModel
         SUM(CASE WHEN u.billing_unit IS NOT NULL THEN 1 ELSE 0 END) as unpricedUnitRequests,
         COUNT(DISTINCT u.api_key_id) as apiKeys,
         COUNT(DISTINCT CASE WHEN ${LIMITED_KEY_SQL} THEN u.api_key_id END) as limitedApiKeys,
-        MAX(u.timestamp) as lastSeenAt
+        MAX(u.timestamp) as lastSeenAt,
+        SUM(CASE WHEN ${unpricedCortecsRerankSql("u")} THEN 1 ELSE 0 END) as unpricedRerankRequests
       FROM usage_history u
       LEFT JOIN api_keys k ON k.id = u.api_key_id
       WHERE u.timestamp >= @sinceIso
@@ -62,6 +65,9 @@ export function getSuccessfulUsageModelGroupsSince(sinceIso: string): UsageModel
         apiKeys: Number(row.apiKeys) || 0,
         limitedApiKeys: Number(row.limitedApiKeys) || 0,
         lastSeenAt: typeof row.lastSeenAt === "string" ? row.lastSeenAt : null,
+        ...(Number(row.unpricedRerankRequests) > 0
+          ? { unpricedRerankRequests: Number(row.unpricedRerankRequests) }
+          : {}),
       },
     ];
   });

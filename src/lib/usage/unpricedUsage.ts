@@ -64,10 +64,33 @@ export async function getUnpricedUsageReport(
       group.provider,
       group.model,
       { input: 1 },
-      { provider: group.provider, model: group.model }
+      {
+        provider: group.provider,
+        model: group.model,
+        endpoint: group.unpricedRerankRequests ? "/v1/rerank" : undefined,
+      }
     );
     // A lookup that threw is a transient store problem, not a missing price.
-    if ((!priced && !failed) || group.unpricedUnitRequests > 0) models.push(group);
+    if ((!priced && !failed) || group.unpricedUnitRequests > 0) {
+      const {
+        provider,
+        model,
+        requests,
+        apiKeys,
+        limitedApiKeys,
+        lastSeenAt,
+        unpricedUnitRequests,
+      } = group;
+      models.push({
+        provider,
+        model,
+        requests,
+        apiKeys,
+        limitedApiKeys,
+        lastSeenAt,
+        unpricedUnitRequests,
+      });
+    }
   }
 
   models.sort(
