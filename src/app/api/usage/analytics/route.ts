@@ -7,6 +7,8 @@ import { getApiKeys } from "@/lib/db/apiKeys";
 import { getUserDatabaseSettings } from "@/lib/db/databaseSettings";
 import {
   reportingTimeZoneSchema,
+  reportingGranularitySchema,
+  validHourlyWindow,
   reportingDate,
   validParisWindow,
 } from "@/lib/db/usageAnalytics/reportingTime";
@@ -532,9 +534,38 @@ async function computeAnalyticsResponse(
       return NextResponse.json({ error: "Invalid reporting time zone" }, { status: 400 });
     }
     const timeZone = zoneResult.data;
+    const granularityResult = reportingGranularitySchema.safeParse(
+      searchParams.get("granularity") ?? "day"
+    );
+    if (!granularityResult.success || searchParams.getAll("granularity").length > 1) {
+      return NextResponse.json({ error: "Invalid reporting granularity" }, { status: 400 });
+    }
+    const granularity = granularityResult.data;
     const range = searchParams.get("range") || "30d";
-    const startDate = searchParams.get("startDate") || undefined;
-    const endDate = searchParams.get("endDate") || undefined;
+    let startDate = searchParams.get("startDate") || undefined;
+    let endDate = searchParams.get("endDate") || undefined;
+    const presetsParam = searchParams.get("presets");
+    if (granularity === "hour") {
+      if (
+        !startDate ||
+        !endDate ||
+        !validHourlyWindow(startDate, endDate) ||
+        presetsParam ||
+        searchParams.get("view") === "apiKeys"
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Hourly reporting requires an explicit ISO window of at most 26 hours without presets or alternate views",
+          },
+          { status: 400 }
+        );
+      }
+      // The SQLite timestamp filters compare canonical UTC strings. Do not
+      // compare an input's local-offset spelling lexicographically to UTC rows.
+      startDate = new Date(startDate).toISOString();
+      endDate = new Date(endDate).toISOString();
+    }
     const apiKeyIdsParam = searchParams.get("apiKeyIds") || "";
     const apiKeyIds = apiKeyIdsParam ? apiKeyIdsParam.split(",").filter(Boolean) : [];
     // Flat-rate subscriptions are $0 in billed-cost analytics by default. The
@@ -546,6 +577,7 @@ async function computeAnalyticsResponse(
     const untilIso = endDate || null;
     const reporting = {
       timeZone,
+      granularity,
       sinceIso: sinceIso ?? null,
       untilIso: untilIso ?? new Date().toISOString(),
     };
@@ -555,7 +587,6 @@ async function computeAnalyticsResponse(
         { status: 400 }
       );
     }
-    const presetsParam = searchParams.get("presets");
 
     const apiKeys = await getApiKeys();
     const currentApiKeyNames = new Map<string, string>();
@@ -611,7 +642,7 @@ async function computeAnalyticsResponse(
       rawCutoffDate,
       apiKeyWhere,
       apiKeyParams: apiKeyParamEntries,
-      rawOnly: timeZone !== "UTC",
+      rawOnly: timeZone !== "UTC" || granularity === "hour",
     });
 
     // Fetch pricing data for cost calculation (no rows loaded)
@@ -1135,14 +1166,18 @@ async function computeAnalyticsResponse(
       reporting: {
         version: 1,
         timeZone,
+        granularity,
         rawHistoryCutoffDate: rawCutoffDate,
         summarizedHistoryExcluded:
-          timeZone !== "UTC" &&
+          (timeZone !== "UTC" || granularity === "hour") &&
           !apiKeyWhere &&
           hasUtcSummaryHistory(reporting.sinceIso!, reporting.untilIso, rawCutoffDate),
       },
       summary,
-      dailyTrend,
+      dailyTrend: granularity === "day" ? dailyTrend : [],
+      ...(granularity === "hour"
+        ? { hourlyTrend: dailyTrend.map(({ date, ...metrics }) => ({ start: date, ...metrics })) }
+        : {}),
       activityMap,
       byModel,
       byProvider,
@@ -1152,7 +1187,7 @@ async function computeAnalyticsResponse(
       weeklyPattern,
       weeklyTokens,
       weeklyCounts,
-      dailyByModel,
+      dailyByModel: granularity === "day" ? dailyByModel : [],
       modelNames,
       errorBreakdown,
       range,

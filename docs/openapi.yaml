@@ -4315,12 +4315,37 @@ paths:
             type: string
             enum: [UTC, Europe/Paris]
             default: UTC
-        - name: period
+        - name: granularity
+          in: query
+          description: >-
+            Defaults to day. Hour requires explicit ISO startDate and endDate
+            spanning at most 26 hours, without presets or view=apiKeys. It returns
+            reporting.granularity=hour and hourlyTrend with UTC hour-start instants
+            and cost/request/token totals. Repeated Paris hours stay distinct.
+            Missing hours are not zero-filled; daily summaries are excluded even
+            in UTC and overlap is flagged in reporting.summarizedHistoryExcluded.
+            Daily trend/model-series fields are empty in the hourly response.
+          schema:
+            type: string
+            enum: [day, hour]
+            default: day
+        - name: range
+          in: query
+          description: Bounded presets for daily reporting; explicit startDate/endDate override them.
+          schema:
+            type: string
+            enum: [1d, 7d, 30d, 90d, 180d, 365d, ytd, all]
+            default: 30d
+        - name: startDate
           in: query
           schema:
             type: string
-            enum: [day, week, month]
-            default: day
+            format: date-time
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date-time
         - name: view
           in: query
           description: >-

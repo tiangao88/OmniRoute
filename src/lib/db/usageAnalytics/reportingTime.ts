@@ -2,10 +2,12 @@
 import { z } from "zod";
 
 export const reportingTimeZoneSchema = z.enum(["UTC", "Europe/Paris"]);
+export const reportingGranularitySchema = z.enum(["day", "hour"]);
 export interface ReportingTimeOptions {
   timeZone: string;
   sinceIso: string | null;
   untilIso: string | null;
+  granularity?: "day" | "hour";
 }
 const formatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Europe/Paris",
@@ -39,6 +41,29 @@ export function validParisWindow(sinceIso: string | null, untilIso: string | nul
   return (
     Number.isFinite(start) && Number.isFinite(end) && end >= start && end - start <= 366 * 86400000
   );
+}
+export function validHourlyWindow(sinceIso: string | null, untilIso: string | null): boolean {
+  if (!sinceIso || !untilIso) return false;
+  const instant = z.string().datetime({ offset: true });
+  if (!instant.safeParse(sinceIso).success || !instant.safeParse(untilIso).success) return false;
+  const start = Date.parse(sinceIso),
+    end = Date.parse(untilIso);
+  return (
+    Number.isFinite(start) && Number.isFinite(end) && end >= start && end - start <= 26 * 3600000
+  );
+}
+/** Hour identifiers are UTC instants, not ambiguous local wall-clock strings.
+ * A Paris 02:00 hour repeated in autumn stays two separate buckets. Consumers
+ * render the instants in the requested zone. Daily rollups must be excluded by
+ * the caller because they cannot be split into honest hourly costs.
+ */
+export function reportingBucketSql(options?: ReportingTimeOptions): string {
+  const granularity = reportingGranularitySchema.parse(options?.granularity ?? "day");
+  reportingTimeZoneSchema.parse(options?.timeZone ?? "UTC");
+  if (granularity === "day") return reportingDaySql(options);
+  if (!options || !validHourlyWindow(options.sinceIso, options.untilIso))
+    throw new Error("Invalid hourly reporting window");
+  return "STRFTIME('%Y-%m-%dT%H:00:00.000Z', timestamp)";
 }
 function offsetMinutes(stamp: number): number {
   const p = civilParts(stamp);

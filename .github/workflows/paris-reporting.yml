@@ -86,6 +86,7 @@ jobs:
         run: >-
           node --import tsx/esm --test
           tests/unit/analytics-reporting-time-zone.test.ts
+          tests/unit/analytics-hourly-reporting.test.ts
           tests/unit/db-usage-analytics-3500.test.ts
           tests/unit/usage-analytics-route.test.ts
           tests/unit/usage-analytics-pricing-memoization.test.ts

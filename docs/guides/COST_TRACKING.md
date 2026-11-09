@@ -56,6 +56,31 @@ rebucketed. Paris reports therefore use timestamped raw history only and flag
 overlapping excluded summaries; UTC remains available for those older totals.
 This is not a promise of complete historical coverage. Costs remain USD.
 
+### Hourly reporting
+
+Opt into `granularity=hour` on the same read-only analytics endpoint, with
+explicit ISO `startDate` and `endDate` instants spanning at most 26 hours. Offset
+inputs are normalized to UTC before filtering. For a "Today" view, the caller
+supplies the selected zone's actual local midnight and the current instant,
+not a rolling 24-hour interval. `timeZone` still accepts only UTC or Europe/Paris.
+Hourly mode cannot be combined with `presets` or `view=apiKeys`.
+
+The response advertises `reporting.granularity: "hour"` and returns
+`hourlyTrend: [{start, requests, promptTokens, completionTokens, totalTokens, cost}]`.
+Each `start` is an unambiguous UTC hour instant, for example
+`2026-10-25T00:00:00.000Z`. The two repeated Paris autumn 02:00 hours remain
+distinct; consumers render their UTC instants with local offsets. Missing
+hours are absent, not filled with fabricated zero costs. The last hour can be
+partial. Hourly costs use the same stored-cost/pricing path as daily reports.
+Daily trend/model-series fields are empty in this explicitly hourly view.
+
+Daily summaries cannot be divided into honest hourly costs, so hourly mode uses
+timestamped raw history only, including when the selected zone is UTC. Overlapping
+excluded summaries are flagged with `reporting.summarizedHistoryExcluded`.
+There is no schema, retention, stored-cost, provider or credential change.
+Without the new parameter, existing daily reporting is unchanged and advertises
+`reporting.granularity: "day"`; no hourly series is returned.
+
 ### The pricing source
 
 Costs come from the merged pricing table in

@@ -12,7 +12,11 @@
 import { getDbInstance } from "./core";
 import { rawCostSums } from "./usageAnalytics/billing";
 import type { AnalyticsParams } from "./usageAnalytics/sources";
-import { reportingDaySql, type ReportingTimeOptions } from "./usageAnalytics/reportingTime";
+import {
+  reportingBucketSql,
+  reportingDaySql,
+  type ReportingTimeOptions,
+} from "./usageAnalytics/reportingTime";
 
 export { buildUnifiedSource, buildPresetUnifiedSource } from "./usageAnalytics/sources";
 export type {
@@ -124,7 +128,7 @@ export function getDailyUsage(
   reporting?: ReportingTimeOptions
 ): DailyUsageRow[] {
   const db = getDbInstance();
-  const day = reportingDaySql(reporting);
+  const day = reportingBucketSql(reporting);
   return db
     .prepare(
       `
@@ -167,7 +171,7 @@ export function getDailyCostRows(
   reporting?: ReportingTimeOptions
 ): DailyCostRow[] {
   const db = getDbInstance();
-  const day = reportingDaySql(reporting);
+  const day = reportingBucketSql(reporting);
   return db
     .prepare(
       `
