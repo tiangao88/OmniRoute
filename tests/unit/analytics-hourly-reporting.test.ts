@@ -88,7 +88,7 @@ test("offset-qualified hourly bounds are normalized to UTC before SQLite filteri
   assert.equal(body.summary.totalCost, 3);
   assert.equal(body.hourlyTrend.length, 2);
 });
-test("fixed empty-window Builder probe proves hourly capability without reading a usage period", async () => {
+test("fixed empty-window probe proves hourly capability without reading a usage period", async () => {
   const response = await read("2000-01-01T00:00:00Z", "2000-01-01T00:00:00Z");
   const body = await response.json();
   assert.equal(response.status, 200);
