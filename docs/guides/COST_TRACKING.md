@@ -200,6 +200,34 @@ remains the reference for invoices and for calls whose charge was not reported.
 
 ---
 
+## Cortecs reranking credits
+
+For dynamic reranker nodes targeting `https://api.cortecs.ai/v1/rerank`,
+OmniRoute records measured token counts and native credits from each successful
+physical request. Cortecs documents `usage.cost` as **credits**, not USD;
+see the [Cortecs rerank response schema](https://docs.cortecs.ai/api/rerank.md).
+
+Set `CORTECS_CREDIT_PRICE_USD` to an explicit positive USD value per raw
+credit if you want a USD valuation. There is no default rate and no automatic
+FX lookup. The rate must reflect your credit denomination and billing/FX policy;
+neither a raw credit count nor a EUR tariff may be copied directly into USD.
+The numerical USD valuation is snapshotted per request for reporting and key
+budgets, while `usage_history.provider_credits` retains the original quantity.
+Later rate or token-catalogue edits do not reprice already-valued requests.
+
+With no valid conversion, positive or missing credit costs remain **unknown**:
+the response omits its numeric cost header, sets
+`X-OmniRoute-Cost-Status: unknown`, and existing unpriced-budget safeguards
+apply to limited keys. Explicit zero credits remain known zero cost.
+Unknown credit spending is not estimated from token tariffs.
+
+The usage vendor is canonical `cortecs`, independent of the node alias.
+The selected custom connection, model and caller key remain attributed.
+The original response body is unchanged, including its native credit units.
+No-log keys keep numerical accounting without document payloads.
+Other rerank providers retain their existing behavior. This is forward-only
+accounting, not a historical backfill or an invoice reconciliation.
+
 ## Dashboard: the Costs page
 
 The **Costs** page lives at `/dashboard/costs`
