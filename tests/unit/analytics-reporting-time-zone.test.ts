@@ -87,6 +87,37 @@ test("Paris analytics groups tokens and actual stored cost on the same local day
   assert.equal(body.summary.totalCost, 3);
   assert.equal(body.reporting.timeZone, "Europe/Paris");
   assert.equal(body.reporting.version, 1);
+  assert.deepEqual(body.dailyByModel, [
+    { date: "2026-07-31", "report-model": 15 },
+    { date: "2026-08-01", "report-model": 15 },
+  ]);
+  assert.equal(body.activityMap["2026-07-31"], 15);
+  assert.equal(body.activityMap["2026-08-01"], 15);
+  assert.equal(body.weeklyCounts[5], 1);
+  assert.equal(body.weeklyCounts[6], 1);
+  // The response cache must never serve a Paris result to a default UTC client.
+  const utc = await route.GET(
+    new Request(
+      "http://localhost/api/usage/analytics?startDate=2026-07-31T00:00:00Z&endDate=2026-08-02T00:00:00Z"
+    )
+  );
+  const utcBody = await utc.json();
+  assert.equal(utcBody.reporting.timeZone, "UTC");
+  assert.equal(utcBody.dailyTrend.length, 1);
+  assert.equal(utcBody.dailyTrend[0].cost, 3);
+});
+
+test("historical Paris heatmap excludes timestamps after the selected end", async () => {
+  insert("2026-07-31T22:30:00.000Z");
+  insert("2026-08-03T12:00:00.000Z");
+  const response = await route.GET(
+    new Request(
+      "http://localhost/api/usage/analytics?timeZone=Europe%2FParis&startDate=2026-07-31T00:00:00Z&endDate=2026-08-02T00:00:00Z"
+    )
+  );
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.deepEqual(body.activityMap, { "2026-08-01": 15 });
 });
 
 test("UTC rollups remain available in default reports but are honestly excluded from Paris", async () => {
@@ -138,6 +169,8 @@ test("time-zone inputs and unbounded Paris windows fail without stack or path di
     "timeZone=Europe%2FParis&timeZone=UTC",
     "timeZone=Europe%2FParis&range=all",
     "timeZone=Europe%2FParis&startDate=bad",
+    "timeZone=Europe%2FParis&startDate=2024-01-01T00:00:00Z&endDate=2026-01-01T00:00:00Z",
+    "timeZone=Europe%2FParis&startDate=2026-08-03T00:00:00Z&endDate=2026-08-02T00:00:00Z",
   ]) {
     const response = await route.GET(new Request("http://localhost/api/usage/analytics?" + query));
     assert.equal(response.status, 400);
