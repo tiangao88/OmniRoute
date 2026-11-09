@@ -10,7 +10,6 @@ concurrency:
 jobs:
   test:
     name: ${{ matrix.suite }}
-    if: github.repository == 'tiangao88/OmniRoute'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -36,7 +35,6 @@ jobs:
           SUITE: ${{ matrix.suite }}
   unit:
     name: test:unit (${{ matrix.shard }}/8)
-    if: github.repository == 'tiangao88/OmniRoute'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -64,3 +62,35 @@ jobs:
           cache: npm
       - run: npm ci --include=optional --legacy-peer-deps --no-audit --no-fund
       - run: npm run test:unit:ci:shard
+  reporting:
+    name: Paris and retained house regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      JWT_SECRET: ci-test-secret-with-sufficient-length-for-validation
+      API_KEY_SECRET: ci-test-api-key-secret-long
+      DISABLE_SQLITE_AUTO_BACKUP: "true"
+      ONNXRUNTIME_NODE_INSTALL: skip
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26.12.1"
+          cache: npm
+      - run: npm ci --include=optional --legacy-peer-deps --no-audit --no-fund
+      - name: Reporting, accounting, auth-cache and tool-choice wire regressions
+        run: >-
+          node --import tsx/esm --test
+          tests/unit/analytics-reporting-time-zone.test.ts
+          tests/unit/db-usage-analytics-3500.test.ts
+          tests/unit/usage-analytics-route.test.ts
+          tests/unit/usage-analytics-pricing-memoization.test.ts
+          tests/unit/usage-analytics-response-cache.test.ts
+          tests/unit/media-cost-tracking.test.ts
+          tests/unit/speech-usage.test.ts
+          tests/unit/tool-choice-schema-normalization.test.ts
+          tests/integration/tool-choice-none-outbound.test.ts
