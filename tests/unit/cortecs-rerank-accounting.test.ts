@@ -248,10 +248,10 @@ test("same-millisecond physical calls remain separate and their stored charges a
     id: key.id,
     usageLimitEnabled: true,
     dailyUsageLimitUsd: 1,
-    fiveHourUsageLimitUsd: 1,
+    weeklyUsageLimitUsd: 1,
   });
   assert.equal(status.dailySpentUsd, 0.68);
-  assert.equal(status.fiveHourSpentUsd, 0.68);
+  assert.equal(status.weeklySpentUsd, 0.68);
   const stats = await import("../../src/lib/usage/usageStats.ts");
   assert.equal((await stats.getUsageStats()).byApiKey[`id:${key.id}`].cost, 0.68);
   const { rollupUsageHistoryBeforeDate } = await import("../../src/lib/usage/aggregateHistory.ts");
