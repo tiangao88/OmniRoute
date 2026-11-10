@@ -94,7 +94,10 @@ jobs:
           opaque_lines = [line for line in opaque.stdout.splitlines() if line.startswith('OPAQUE_IMAGE_SMOKE=')]
           assert len(opaque_lines) == 1, 'Compiled reasoning report missing'
           opaque_report = json.loads(opaque_lines[0].split('=', 1)[1])
-          assert opaque_report['checks'] == 24 and opaque_report['compiledModules'] and opaque_report['networkCalls'] == 0
+          copies = opaque_report['moduleCounts']
+          assert copies['credential'] >= 1 and copies['pii'] >= 1
+          expected_cases = 8 * (copies['credential'] + copies['pii'] + copies['credential'] * copies['pii'])
+          assert opaque_report['checks'] == expected_cases and opaque_report['compiledModules'] and opaque_report['networkCalls'] == 0
           record('compiled opaque reasoning and credential/PII streams', opaque_report)
           # Synthetic rows and a read-only token exist only in this network-none
           # disposable tmpfs. No production key, model or database is used.

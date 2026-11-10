@@ -29,23 +29,38 @@ async function main() {
     const chunk = require(path.join(server, "chunks", name));
     if (chunk.modules) runtime.C(chunk);
   }
-  async function exportedFactory(moduleMarker, functionMarker) {
+  async function exportedFactories(moduleMarker, functionMarker) {
     const matches = Object.entries(runtime.m).filter(([, factory]) =>
       factory.toString().includes(moduleMarker)
     );
-    assert.equal(matches.length, 1, "Expected one compiled module: " + moduleMarker);
-    const exports = await runtime(matches[0][0]);
-    const functions = Object.values(exports).filter(
-      (value) => typeof value === "function" && value.toString().includes(functionMarker)
-    );
-    assert.equal(functions.length, 1, "Expected one shipped transform export");
-    return functions[0];
+    assert(matches.length > 0, "Compiled module missing: " + moduleMarker);
+    const factories = [];
+    for (const [id] of matches) {
+      const exports = await runtime(id);
+      const functions = Object.values(exports).filter(
+        (value) => typeof value === "function" && value.toString().includes(functionMarker)
+      );
+      assert.equal(functions.length, 1, "Expected one shipped transform export in module " + id);
+      factories.push({ id, create: functions[0] });
+    }
+    return factories;
   }
-  const credential = await exportedFactory(
+  const credentials = await exportedFactories(
     "Credential stream choice limit exceeded",
     "processToolArgs"
   );
-  const pii = await exportedFactory("PII_TEST_BYPASS_MIN_WINDOW", "PII_WINDOW_SIZE");
+  const piies = await exportedFactories("PII_TEST_BYPASS_MIN_WINDOW", "PII_WINDOW_SIZE");
+  const modes = [
+    ...credentials.map((value) => ({ name: "credential-" + value.id, credential: value.create })),
+    ...piies.map((value) => ({ name: "pii-" + value.id, pii: value.create })),
+    ...credentials.flatMap((credential) =>
+      piies.map((pii) => ({
+        name: "composed-" + credential.id + "-" + pii.id,
+        credential: credential.create,
+        pii: pii.create,
+      }))
+    ),
+  ];
   const secret = "sk-" + "A1b2".repeat(12);
   const opaque = [0, 1].map((index) => ({
     index,
@@ -76,15 +91,15 @@ async function main() {
         offset = Math.min(bytes.length, offset + fragment);
       },
     });
-    if (mode !== "credential") stream = stream.pipeThrough(pii());
-    if (mode !== "pii") stream = stream.pipeThrough(credential());
+    if (mode.pii) stream = stream.pipeThrough(mode.pii());
+    if (mode.credential) stream = stream.pipeThrough(mode.credential());
     const text = await new Response(stream).text();
     return text
       .split(/\r?\n/)
       .filter((line) => line.startsWith("data:") && line.slice(5).trim().startsWith("{"))
       .map((line) => JSON.parse(line.slice(5)));
   }
-  for (const mode of ["credential", "pii", "composed"]) {
+  for (const mode of modes) {
     for (const fragment of [1, 37]) {
       for (const ending of ["finish", "done", "eof"]) {
         const input =
@@ -151,7 +166,7 @@ async function main() {
       assert.equal(generic.map((event) => event.reasoning_content ?? "").join(""), "reason-two");
       const visible = generic.map((event) => event.text ?? "").join("");
       assert(visible.startsWith("public "));
-      if (mode !== "pii") assert(!visible.includes(secret), "Credential masking disabled");
+      if (mode.credential) assert(!visible.includes(secret), "Credential masking disabled");
       checks++;
     }
   }
@@ -162,7 +177,8 @@ async function main() {
         checks,
         result: "pass",
         compiledModules: true,
-        modes: ["credential", "pii", "composed"],
+        modes: modes.map((mode) => mode.name),
+        moduleCounts: { credential: credentials.length, pii: piies.length },
         fragmentation: [1, 37],
         networkCalls,
       })
