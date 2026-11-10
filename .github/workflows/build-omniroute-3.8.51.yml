@@ -1,11 +1,11 @@
-# Verification phase for the reviewed house tool-choice candidate.
+# Verification phase for the cumulative opaque-reasoning candidate.
 # This deliberately reuses a dispatchable workflow path from the default branch;
 # nothing is installed or deployed on an operator or production server.
-name: Verify OmniRoute cumulative house image
+name: Verify OmniRoute cumulative reasoning image
 
 on:
   push:
-    branches: [fix/house-cortecs-usd-20261109]
+    branches: [fix/house-opaque-reasoning-20261110]
   workflow_dispatch:
     inputs:
       image_digest:
@@ -27,9 +27,12 @@ jobs:
     timeout-minutes: 12
     env:
       IMAGE: ghcr.io/tiangao88/omniroute@${{ inputs.image_digest }}
-      SOURCE_COMMIT: d73bf03a412a75aedd8a8432ccfa407412004acd
+      SOURCE_COMMIT: 437b83a2356b30c17b751b2ba8b3671923cd2b8b
       CONTAINER: omniroute-house-cumulative-image-smoke
     steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Pull exact public image and boot with no network or production data
         run: |
           set -euo pipefail
@@ -46,8 +49,8 @@ jobs:
           import json, os, subprocess, time, pathlib
           container = os.environ['CONTAINER']
           report = {'image': os.environ['IMAGE'], 'sourceCommit': os.environ['SOURCE_COMMIT'], 'network': 'none', 'data': 'fresh tmpfs', 'checks': []}
-          def run(args, allow_fail=False):
-              p = subprocess.run(args, text=True, capture_output=True, timeout=25)
+          def run(args, allow_fail=False, input=None):
+              p = subprocess.run(args, input=input, text=True, capture_output=True, timeout=25)
               if not allow_fail and p.returncode:
                   raise RuntimeError('Command failed: ' + ' '.join(args) + '; rc=' + str(p.returncode) + '; ' + p.stderr[-1500:])
               return p
@@ -87,6 +90,12 @@ jobs:
           record('application version and document-billing migration', json.loads(billing.stdout))
           compiled = node("import fs from 'node:fs'; import path from 'node:path'; const wanted=['X-OmniRoute-Cost-Status','Billing persistence failed','/api/v1/generation','CORTECS_CREDIT_PRICE_USD','annotation_cost_per_page','x-cortecs-cost-unit']; const found=new Set(); function scan(dir){ if(!fs.existsSync(dir))return; for(const e of fs.readdirSync(dir,{withFileTypes:true})){ if(found.size===wanted.length)return; const p=path.join(dir,e.name); if(e.isDirectory())scan(p); else if(e.isFile() && /\\.m?js$/.test(e.name)){const s=fs.readFileSync(p,'utf8');for(const v of wanted)if(s.includes(v))found.add(v);}}} scan('/app/.next/server');scan('/app/.build/next/server');if(found.size!==wanted.length)throw new Error('Compiled media accounting markers absent');console.log(JSON.stringify({markers:[...found]}));")
           record('compiled cumulative accounting implementation', json.loads(compiled.stdout))
+          opaque = run(['docker', 'exec', '-i', container, 'node'], input=pathlib.Path('scripts/ci/opaque-reasoning-image-smoke.cjs').read_text())
+          opaque_lines = [line for line in opaque.stdout.splitlines() if line.startswith('OPAQUE_IMAGE_SMOKE=')]
+          assert len(opaque_lines) == 1, 'Compiled reasoning report missing'
+          opaque_report = json.loads(opaque_lines[0].split('=', 1)[1])
+          assert opaque_report['checks'] == 24 and opaque_report['compiledModules'] and opaque_report['networkCalls'] == 0
+          record('compiled opaque reasoning and credential/PII streams', opaque_report)
           # Synthetic rows and a read-only token exist only in this network-none
           # disposable tmpfs. No production key, model or database is used.
           paris = node("""
@@ -145,7 +154,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: d73bf03a412a75aedd8a8432ccfa407412004acd
+          ref: 437b83a2356b30c17b751b2ba8b3671923cd2b8b
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
@@ -176,4 +185,19 @@ jobs:
           tests/unit/tool-choice-schema-normalization.test.ts
           tests/unit/responses-to-chat-no-tools-tool-choice-12141.test.ts
           tests/integration/tool-choice-none-outbound.test.ts
+      - name: Opaque reasoning and retained streaming contracts
+        run: >-
+          node --import tsx/esm --import ./tests/_setup/isolateDataDir.ts --test-force-exit --test --test-concurrency=2
+          tests/unit/opaque-reasoning-stream.test.ts
+          tests/unit/issue-19185-encrypted-reasoning-data-not-content.test.ts
+          tests/unit/sseTextTransform.test.ts
+          tests/unit/streaming-credential-transform.test.ts
+          tests/unit/credential-sse-metadata-keys-18006.test.ts
+          tests/unit/issue-13488-pii-openrouter-metadata-splice.test.ts
+          tests/unit/streamingPiiTransform.test.ts
+          tests/unit/streaming-pii-optout-gate.test.ts
+          tests/unit/streaming-credential-fragments-17291.test.ts
+          tests/unit/streaming-credential-limits-17291.test.ts
+          tests/unit/chatcore-streaming-pipeline.test.ts
+          tests/unit/pii-opt-in-default.test.ts
       - run: npm run check:docs-all
