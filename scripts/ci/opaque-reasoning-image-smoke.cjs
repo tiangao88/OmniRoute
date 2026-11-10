@@ -23,12 +23,14 @@ async function main() {
     fs.existsSync(path.join(dir, "webpack-runtime.js"))
   );
   assert(server, "Shipped webpack runtime missing");
+  // API entries contain framework module definitions that shared chunks depend
+  // on. Initialize the real Chat Completions entry before inspecting its runtime.
+  const entry = path.join(server, "app/api/v1/chat/completions/route.js");
+  assert(fs.existsSync(entry), "Shipped Chat Completions entry missing");
+  await require(entry);
   const runtime = require(path.join(server, "webpack-runtime.js"));
-  for (const name of fs.readdirSync(path.join(server, "chunks"))) {
-    if (!name.endsWith(".js")) continue;
-    const chunk = require(path.join(server, "chunks", name));
-    if (chunk.modules) runtime.C(chunk);
-  }
+  // Inspect the modules registered by this real entry. Blindly registering
+  // unrelated page chunks mixes framework layers with missing entry-local deps.
   async function exportedFactories(moduleMarker, functionMarker) {
     const matches = Object.entries(runtime.m).filter(([, factory]) =>
       factory.toString().includes(moduleMarker)
@@ -177,6 +179,7 @@ async function main() {
         checks,
         result: "pass",
         compiledModules: true,
+        entry: "app/api/v1/chat/completions/route.js",
         modes: modes.map((mode) => mode.name),
         moduleCounts: { credential: credentials.length, pii: piies.length },
         fragmentation: [1, 37],
