@@ -8,7 +8,13 @@ process.env.APP_LOG_TO_FILE = "false";
 process.env.PII_RESPONSE_SANITIZATION = "true";
 process.env.PII_RESPONSE_SANITIZATION_MODE = "redact";
 process.env.CREDENTIAL_REDACTION_ENABLED = "true";
+// Unused provider-client version discovery must not reach external registries.
+process.env.CLAUDE_CODE_CLIENT_VERSION = "1.0.0";
+process.env.CODEX_CLIENT_VERSION = "1.0.0";
+process.env.GITHUB_COPILOT_CLI_VERSION = "1.0.0";
+let networkCalls = 0;
 globalThis.fetch = async () => {
+  networkCalls++;
   throw new Error("Network forbidden in compiled stream smoke");
 };
 
@@ -149,6 +155,7 @@ async function main() {
       checks++;
     }
   }
+  assert.equal(networkCalls, 0, "Compiled smoke attempted an external request");
   console.log(
     "OPAQUE_IMAGE_SMOKE=" +
       JSON.stringify({
@@ -157,7 +164,7 @@ async function main() {
         compiledModules: true,
         modes: ["credential", "pii", "composed"],
         fragmentation: [1, 37],
-        networkCalls: 0,
+        networkCalls,
       })
   );
 }
