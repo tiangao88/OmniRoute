@@ -85,6 +85,8 @@ export function classifyField(key: string, parentKey = ""): FieldCategory | null
   if (FIXED_CATEGORY_MAP[key]) {
     return FIXED_CATEGORY_MAP[key];
   }
+  // OpenRouter encrypted reasoning payloads are opaque protocol state, not answer text.
+  if (key === "data" && parentKey === "reasoning_details") return null;
   if (key === "text" && parentKey === "reasoning_details") {
     return "reasoning";
   }
@@ -92,6 +94,34 @@ export function classifyField(key: string, parentKey = ""): FieldCategory | null
     return null;
   }
   return "content";
+}
+
+/** The complete encrypted reasoning record is protocol state, including unknown extensions. */
+export function isOpaqueReasoningDetail(value: unknown, parentKey: string): boolean {
+  return (
+    parentKey === "reasoning_details" &&
+    value !== null &&
+    typeof value === "object" &&
+    (value as Record<string, unknown>).type === "reasoning.encrypted"
+  );
+}
+
+/**
+ * A synthetic text-tail flush must not replay opaque records already forwarded in the
+ * original frames. Call only on the cloned flush template, never on an incoming frame.
+ */
+export function omitEmittedOpaqueReasoningFromFlush(value: unknown): void {
+  if (!value || typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  for (const [key, child] of Object.entries(record)) {
+    if (key === "reasoning_details" && Array.isArray(child)) {
+      const remaining = child.filter((detail) => !isOpaqueReasoningDetail(detail, key));
+      if (remaining.length) record[key] = remaining;
+      else delete record[key];
+    } else {
+      omitEmittedOpaqueReasoningFromFlush(child);
+    }
+  }
 }
 
 // Back-compat helper kept for any external caller expecting a category rather than `null`
@@ -226,11 +256,13 @@ export function createSseTextTransform(
             parentKey = ""
           ) => {
             if (!obj || typeof obj !== "object") return;
+            if (isOpaqueReasoningDetail(obj, parentKey)) return;
 
             const { choiceIdx, toolIdx } = resolveStreamIndices(
               obj,
               currentChoiceIdx,
-              currentToolIdx
+              currentToolIdx,
+              parentKey
             );
 
             const compositeKey = `${choiceIdx}_${toolIdx}`;
@@ -239,8 +271,15 @@ export function createSseTextTransform(
             for (const key of Object.keys(obj)) {
               if (typeof obj[key] === "string") {
                 const val = obj[key];
-                // Preserve Chat Completions aliases without changing native-format routing.
-                const fieldName = Array.isArray(json.choices) ? key : undefined;
+                // Keep wire aliases distinct in Chat and generic text envelopes. Native
+                // Responses/Gemini retain their format-specific buffer/flush routing.
+                const fieldName =
+                  Array.isArray(json.choices) ||
+                  (key === "reasoning_content" &&
+                    !Array.isArray(json.candidates) &&
+                    !String(json.type ?? "").startsWith("response."))
+                    ? key
+                    : undefined;
                 const field =
                   key === "delta" && obj === json && isResponsesToolArgsDelta(json)
                     ? "toolArgs"

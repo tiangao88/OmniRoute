@@ -1,0 +1,1 @@
+- Preserve complete opaque reasoning records and their enclosing stream indices through credential and PII transforms, including generic text-tail flushes.
