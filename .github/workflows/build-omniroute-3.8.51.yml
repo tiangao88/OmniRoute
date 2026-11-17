@@ -1,11 +1,11 @@
 # Verification phase for the cumulative opaque-reasoning candidate.
 # This deliberately reuses a dispatchable workflow path from the default branch;
 # nothing is installed or deployed on an operator or production server.
-name: Verify OmniRoute cumulative reasoning image
+name: Verify OmniRoute cumulative Team accounting image
 
 on:
   push:
-    branches: [fix/house-opaque-reasoning-20261110]
+    branches: [fix/house-team-budget-20357-20261117]
   workflow_dispatch:
     inputs:
       image_digest:
@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 12
     env:
       IMAGE: ghcr.io/tiangao88/omniroute@${{ inputs.image_digest }}
-      SOURCE_COMMIT: 437b83a2356b30c17b751b2ba8b3671923cd2b8b
+      SOURCE_COMMIT: 0a020e4853e5609f5e3a510563430f2237860632
       CONTAINER: omniroute-house-cumulative-image-smoke
     steps:
       - uses: actions/checkout@v7
@@ -98,6 +98,12 @@ jobs:
           expected_cases = 8 * (copies['credential'] + copies['pii'] + copies['credential'] * copies['pii'])
           assert opaque_report['checks'] == expected_cases and opaque_report['compiledModules'] and opaque_report['networkCalls'] == 0
           record('compiled opaque reasoning and credential/PII streams', opaque_report)
+          team = run(['docker', 'exec', '-i', container, 'node'], input=pathlib.Path('scripts/ci/team-budget-image-smoke.cjs').read_text())
+          team_lines = [line for line in team.stdout.splitlines() if line.startswith('TEAM_BUDGET_IMAGE_SMOKE=')]
+          assert len(team_lines) == 1, 'Compiled Team accounting report missing'
+          team_report = json.loads(team_lines[0].split('=', 1)[1])
+          assert team_report['checks'] == 7 and team_report['compiledHttpRoutes']
+          record('compiled Team accounting and per-second speech charges', team_report)
           # Synthetic rows and a read-only token exist only in this network-none
           # disposable tmpfs. No production key, model or database is used.
           paris = node("""
@@ -159,7 +165,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: 437b83a2356b30c17b751b2ba8b3671923cd2b8b
+          ref: 0a020e4853e5609f5e3a510563430f2237860632
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
@@ -168,6 +174,19 @@ jobs:
       - run: npm ci --include=optional --legacy-peer-deps --no-audit --no-fund
       - run: npm run typecheck:core
       - run: npm run test:vitest
+      - name: Team dashboard accounting regressions
+        run: npx --no-install vitest run --config vitest.config.ts tests/unit/ui/team-costs-page.test.tsx --maxWorkers=2 --no-file-parallelism
+      - name: Team recorded charges, policy, retention and endpoint compatibility
+        run: >-
+          node --import tsx/esm --import ./tests/_setup/isolateDataDir.ts --test-force-exit --test --test-concurrency=2
+          tests/unit/team-budget-recorded-costs-20354.test.ts
+          tests/unit/team-retained-cost-shapes.test.ts
+          tests/unit/team-management.test.ts
+          tests/unit/team-dashboard-read.test.ts
+          tests/unit/team-management-route.test.ts
+          tests/unit/unpriced-usage-budget-policy-12341.test.ts
+          tests/unit/feature-flags-unpriced-policy.test.ts
+          tests/unit/cortecs-rerank-pricing-scope.test.ts
       - name: Cumulative accounting, reporting and finalizer regressions
         run: >-
           node --import tsx/esm --import ./tests/_setup/isolateDataDir.ts --test-force-exit --test
