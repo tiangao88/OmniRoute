@@ -100,7 +100,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: "26.12.1"
+          node-version: "24"
           package-manager-cache: false
       - uses: ./.github/actions/npm-ci-retry
         with:
@@ -108,6 +108,53 @@ jobs:
       - run: npm run test:unit:ci:shard
         env:
           TEST_SHARD: ${{ matrix.shard }}
+
+  baseline:
+    if: inputs.image_digest == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["24", "26.12.1"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: cheaper-inference/OmniRoute
+          ref: 1c880c5c95b3f0240d5e4c6c8f0947ec46b5d25e
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - uses: ./.github/actions/npm-ci-retry
+        with:
+          cache: "false"
+      - name: Reproduce inherited TLS test behavior on the untouched release
+        env:
+          MATRIX_NODE: ${{ matrix.node }}
+        run: |
+          test "$(git rev-parse HEAD)" = "1c880c5c95b3f0240d5e4c6c8f0947ec46b5d25e"
+          set +e
+          node --import tsx/esm --import ./open-sse/utils/setupPolyfill.ts --import ./tests/_setup/isolateDataDir.ts --test --test-force-exit tests/unit/cursor-h2-proxy-tunnel.test.ts tests/unit/upstream-http2-transport.test.ts tests/unit/workflows-no-foreign-fork-publishers.test.ts > baseline-tests.txt 2>&1
+          result=$?
+          set -e
+          cat baseline-tests.txt
+          if [ "$MATRIX_NODE" = "24" ]; then
+            test "$result" = "0"
+          else
+            test "$result" = "1"
+            grep -q 'the proxy must have received something' baseline-tests.txt
+            grep -q 'ERR_INVALID_ARG_VALUE' baseline-tests.txt
+            grep -Eq '(fail 3|# fail 3)' baseline-tests.txt
+            echo "Confirmed inherited Node 26 TLS test failure; the canonical unit CI uses Node 24."
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: untouched-release-node-${{ matrix.node }}
+          path: baseline-tests.txt
+          retention-days: 30
 
   vitest:
     if: inputs.image_digest == ''
@@ -129,7 +176,7 @@ jobs:
 
   publish:
     if: inputs.image_digest == '' && inputs.publish_image
-    needs: [source, units, vitest]
+    needs: [source, units, vitest, baseline]
     runs-on: ubuntu-latest
     timeout-minutes: 150
     permissions:
@@ -147,7 +194,7 @@ jobs:
         run: |
           test "$GITHUB_REPOSITORY" = "tiangao88/OmniRoute"
           source=$(git rev-parse HEAD)
-          image="ghcr.io/tiangao88/omniroute:3.8.54-house-cumulative-${source:0:10}"
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/omniroute:3.8.54-house-cumulative-${source:0:10}"
           echo "image=$image" >> "$GITHUB_OUTPUT"
           echo "source=$source" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
