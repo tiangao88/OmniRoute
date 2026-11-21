@@ -19,7 +19,7 @@ const envelope = "enc:v1:" + iv.toString("hex") + ":" + encrypted + ":" + cipher
 const hash = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const queries = {
   team: "SELECT id,name,status,max_budget_usd,budget_duration,budget_reset_at FROM teams WHERE id='synthetic-upgrade-team'",
-  keys: "SELECT id,name,key,model_access_mode,allowed_models,allowed_combos,allowed_connections FROM api_keys WHERE id LIKE 'synthetic-upgrade-key-%' ORDER BY id",
+  keys: "SELECT id,name,key,allowed_models FROM api_keys WHERE id LIKE 'synthetic-upgrade-key-%' ORDER BY id",
   members: "SELECT api_key_id,team_id,valid_from FROM api_key_billing_team_history WHERE team_id='synthetic-upgrade-team' ORDER BY api_key_id",
   providers: "SELECT id,provider,name,api_key FROM provider_connections WHERE id='synthetic-upgrade-connection'",
   nodes: "SELECT id,type,name,prefix,base_url FROM provider_nodes WHERE id='synthetic-upgrade-node'",
@@ -39,8 +39,6 @@ async function main() {
     const key="synthetic-upgrade-key-"+i;
     db.prepare("INSERT INTO api_keys(id,name,key,allowed_models,created_at) VALUES (?,?,?,?,?)")
       .run(key,"Synthetic key "+i,"synthetic-inference-"+i,JSON.stringify(["synthetic-route"]),created);
-    db.prepare("UPDATE api_keys SET model_access_mode='restricted',allowed_combos=?,allowed_connections=? WHERE id=?")
-      .run(JSON.stringify(["synthetic-route"]),JSON.stringify(["synthetic-upgrade-connection"]),key);
     db.prepare("INSERT INTO api_key_billing_team_history(id,api_key_id,team_id,valid_from,created_at) VALUES (?,?,?,?,?)")
       .run("synthetic-membership-"+i,key,team,created,created);
   }
