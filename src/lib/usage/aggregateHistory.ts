@@ -137,6 +137,20 @@ export async function rollupHourlyQuota(
 }
 
 /**
+ * SQL predicate: a retained Team shape map honours the count contract of
+ * parseBillingShapeCounts (a JSON object of non-negative integer counts that sum to the
+ * bucket's request count). Syntactic validity alone is not enough: a negative count could
+ * cancel against the next rollup and leave a map that parses as fully priced.
+ */
+function teamShapeMapHonoursContractSql(column: string, requests: string): string {
+  // Nested CASEs keep json_type/json_each away from malformed JSON, which they reject.
+  return `CASE WHEN json_valid(${column}) THEN CASE WHEN json_type(${column}) = 'object' THEN
+    NOT EXISTS (SELECT 1 FROM json_each(${column}) WHERE type != 'integer' OR value < 0)
+    AND (SELECT COALESCE(SUM(value), 0) FROM json_each(${column})) = ${requests}
+    ELSE 0 END ELSE 0 END`;
+}
+
+/**
  * Roll up usage_history into daily_usage_summary before raw rows are deleted.
  * This is the authoritative rollup — sourced from actual per-request token data,
  * not from quota_snapshots. Should be called before cleanupUsageHistory() deletes rows.
@@ -168,7 +182,12 @@ export async function rollupUsageHistoryBeforeDate(beforeDate: string): Promise<
           COALESCE(NULLIF(LOWER(model), ''), '__unknown_model__') AS model,
           COALESCE(NULLIF(service_tier, ''), 'standard') AS service_tier,
           DATE(timestamp) AS date,
-          json_array(COALESCE(tokens_input,0), COALESCE(tokens_output,0), COALESCE(tokens_cache_read,0), COALESCE(tokens_cache_creation,0), COALESCE(tokens_reasoning,0)) AS shape,
+          CASE WHEN provider_cost_usd IS NULL AND calculated_cost_usd IS NULL
+            AND endpoint IS NULL AND billing_unit IS NULL THEN
+            json_array(COALESCE(tokens_input,0), COALESCE(tokens_output,0), COALESCE(tokens_cache_read,0), COALESCE(tokens_cache_creation,0), COALESCE(tokens_reasoning,0))
+          ELSE json_array(COALESCE(tokens_input,0), COALESCE(tokens_output,0),
+            COALESCE(tokens_cache_read,0), COALESCE(tokens_cache_creation,0), COALESCE(tokens_reasoning,0),
+            provider_cost_usd, calculated_cost_usd, endpoint, billing_unit) END AS shape,
           COUNT(*) AS count_all,
           SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) AS count_success
         FROM usage_history
@@ -242,24 +261,28 @@ export async function rollupUsageHistoryBeforeDate(beforeDate: string): Promise<
         successful_cache_read_tokens = daily_team_usage_summary.successful_cache_read_tokens + excluded.successful_cache_read_tokens,
         successful_cache_creation_tokens = daily_team_usage_summary.successful_cache_creation_tokens + excluded.successful_cache_creation_tokens,
         successful_reasoning_tokens = daily_team_usage_summary.successful_reasoning_tokens + excluded.successful_reasoning_tokens,
-        token_shapes_json = CASE WHEN daily_team_usage_summary.total_requests > 0
-          AND daily_team_usage_summary.token_shapes_json IS NULL THEN NULL ELSE (
+        token_shapes_json = (
           SELECT json_group_object(shape, total) FROM (
             SELECT key AS shape, SUM(value) AS total FROM (
-              SELECT key, value FROM json_each(COALESCE(daily_team_usage_summary.token_shapes_json, '{}'))
+              SELECT key, value FROM json_each(CASE
+                WHEN ${teamShapeMapHonoursContractSql("daily_team_usage_summary.token_shapes_json", "daily_team_usage_summary.total_requests")} THEN daily_team_usage_summary.token_shapes_json
+                ELSE json_object(CASE WHEN daily_team_usage_summary.token_shapes_json IS NULL
+                  THEN 'legacy_unpriced' ELSE 'legacy_invalid' END, daily_team_usage_summary.total_requests) END)
               UNION ALL SELECT key, value FROM json_each(excluded.token_shapes_json)
             ) GROUP BY key
           )
-        ) END,
-        successful_token_shapes_json = CASE WHEN daily_team_usage_summary.successful_requests > 0
-          AND daily_team_usage_summary.successful_token_shapes_json IS NULL THEN NULL ELSE (
+        ),
+        successful_token_shapes_json = (
           SELECT json_group_object(shape, total) FROM (
             SELECT key AS shape, SUM(value) AS total FROM (
-              SELECT key, value FROM json_each(COALESCE(daily_team_usage_summary.successful_token_shapes_json, '{}'))
+              SELECT key, value FROM json_each(CASE
+                WHEN ${teamShapeMapHonoursContractSql("daily_team_usage_summary.successful_token_shapes_json", "daily_team_usage_summary.successful_requests")} THEN daily_team_usage_summary.successful_token_shapes_json
+                ELSE json_object(CASE WHEN daily_team_usage_summary.successful_token_shapes_json IS NULL
+                  THEN 'legacy_unpriced' ELSE 'legacy_invalid' END, daily_team_usage_summary.successful_requests) END)
               UNION ALL SELECT key, value FROM json_each(excluded.successful_token_shapes_json)
             ) GROUP BY key
           )
-        ) END
+        )
     `;
     const rows = db
       .prepare(
@@ -269,6 +292,7 @@ export async function rollupUsageHistoryBeforeDate(beforeDate: string): Promise<
           DATE(timestamp) as date,
           COALESCE(NULLIF(service_tier, ''), 'standard') as serviceTier,
           COUNT(*) as totalRequests,
+          endpoint as requestEndpoint,
           COALESCE(tokens_input, 0) as requestInputTokens,
           COALESCE(tokens_output, 0) as requestOutputTokens,
           COALESCE(tokens_cache_read, 0) as requestCacheReadTokens,
@@ -288,7 +312,7 @@ export async function rollupUsageHistoryBeforeDate(beforeDate: string): Promise<
         WHERE timestamp < ?
           AND provider IS NOT NULL AND provider != ''
           AND model IS NOT NULL AND model != ''
-        GROUP BY LOWER(provider), LOWER(model), DATE(timestamp), serviceTier,
+        GROUP BY LOWER(provider), LOWER(model), DATE(timestamp), serviceTier, requestEndpoint,
           requestInputTokens, requestOutputTokens, requestCacheReadTokens,
           requestCacheCreationTokens, requestReasoningTokens, hasStoredCost`
       )
@@ -298,6 +322,7 @@ export async function rollupUsageHistoryBeforeDate(beforeDate: string): Promise<
       date: string;
       serviceTier: string;
       totalRequests: number;
+      requestEndpoint: string | null;
       requestInputTokens: number;
       requestOutputTokens: number;
       requestCacheReadTokens: number;
@@ -344,6 +369,7 @@ export async function rollupUsageHistoryBeforeDate(beforeDate: string): Promise<
                 provider: row.provider,
                 model: row.model,
                 serviceTier: row.serviceTier,
+                endpoint: row.requestEndpoint,
                 // The archive stores API-equivalent value. Billed-cost consumers
                 // still mask flat-rate providers when they read this value.
                 flatRateAsZero: false,

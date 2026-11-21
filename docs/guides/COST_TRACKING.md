@@ -1,7 +1,7 @@
 ---
 title: "Cost & Spend Tracking"
 version: 3.8.54
-lastUpdated: 2026-11-09
+lastUpdated: 2026-11-21
 ---
 
 # Cost & Spend Tracking
@@ -39,6 +39,22 @@ Because the number is an estimate:
 ---
 
 ## How costs are estimated
+
+### Reporting time zones
+
+`GET /api/usage/analytics` defaults to UTC. Set `timeZone=Europe/Paris`
+with explicit `startDate` and `endDate` ISO instants to report Paris calendar
+days. The finite window must not exceed 366 days. Daily costs, requests and
+tokens, the activity heatmap and weekday patterns use the same IANA
+daylight-saving rules. No global process time zone, stored timestamp, currency,
+schema or inference route is changed. Existing UTC clients keep their behavior.
+
+The response includes `reporting.version: 1`, `reporting.timeZone`,
+`reporting.rawHistoryCutoffDate` and `reporting.summarizedHistoryExcluded`.
+Older `daily_usage_summary` rows represent UTC days and cannot be accurately
+rebucketed. Paris reports therefore use timestamped raw history only and flag
+overlapping excluded summaries; UTC remains available for those older totals.
+This is not a promise of complete historical coverage. Costs remain USD.
 
 ### The pricing source
 
@@ -183,6 +199,49 @@ No historical speech/image charge is invented or backfilled. Provider billing
 remains the reference for invoices and for calls whose charge was not reported.
 
 ---
+
+## Cortecs reranking costs
+
+For dynamic reranker nodes targeting `https://api.cortecs.ai/v1/rerank`,
+OmniRoute sends `x-cortecs-cost-unit: USD` and records the returned `usage.cost`
+directly as USD for each successful physical request. This also applies to
+the existing `/rerank` fallback. Cortecs performs the currency conversion;
+see its [USD cost-header documentation](https://docs.cortecs.ai/integration-examples/tooling/litellm.md).
+There is no extra account/management key, manually maintained exchange rate,
+token-tariff estimate or second conversion. Fractional and whole-dollar USD
+amounts are both accepted, including explicit zero. USD amounts are not stored
+as native credits or used to invent a credit quantity.
+
+The numerical USD cost is snapshotted in `provider_cost_usd` for reporting and
+key budgets. Later token-catalogue edits do not reprice already-valued requests.
+
+Missing or invalid reported USD costs remain **unknown**, never guessed: the
+response omits its numeric cost header, sets `X-OmniRoute-Cost-Status: unknown`,
+and existing unpriced-budget safeguards apply to limited keys. An explicit zero
+remains a known zero cost.
+Unknown credit spending is not estimated from token tariffs.
+
+Each new rerank usage row records `billing_unit=request` and
+`billing_quantity=1`. Missing USD charges use the existing
+`unpricedUnitRequests` reporting and budget path, not a separate rerank
+counter. Older rerank rows without unit metadata retain the same unknown-cost
+protection through their recorded endpoint; no historical rows are rewritten.
+Cloud initialization reconciles the endpoint and billing columns as well,
+without relying on filesystem migrations.
+
+The usage vendor is canonical `cortecs`, independent of the node alias.
+The selected custom connection, model and caller key remain attributed.
+The response body retains the provider's reported USD `usage.cost` unchanged.
+No-log keys keep numerical accounting without document payloads.
+Other rerank providers retain their existing behavior. This is forward-only
+accounting, not a historical backfill or an invoice reconciliation.
+
+The name `cortecs` alone does not disable a custom chat/embedding node's
+configured token prices. Rerank accounting is distinguished by the recorded
+endpoint or explicit normalized credit provenance. Missing rerank costs remain
+unpriced in durable quotas, reports and rollups even if a token tariff exists;
+those tokens remain visible but are not billed. Archived Cortecs snapshots,
+including zero/unknown values, are not retrospectively token-repriced.
 
 ## Dashboard: the Costs page
 

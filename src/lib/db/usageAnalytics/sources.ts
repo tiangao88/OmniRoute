@@ -3,9 +3,11 @@ import { ESTIMATED_USAGE_SQL, UNKNOWN_USAGE_SQL } from "../usageEvidenceAggregat
  * db/usageAnalytics/sources.ts — Pure SQL source-string builders for usage analytics.
  *
  * Builds the UNION subqueries that merge recent `usage_history` rows with older
- * `daily_usage_summary` aggregates. These functions are pure (no DB calls, no imports)
+ * `daily_usage_summary` aggregates. These functions are pure (no DB calls)
  * and are consumed by the query functions in the parent `usageAnalytics.ts` module.
  */
+
+import { tokenPriceableUsageSql } from "../usageCostSql";
 
 export type AnalyticsParams = Record<string, string>;
 
@@ -14,6 +16,8 @@ export type AnalyticsParams = Record<string, string>;
 // ---------------------------------------------------------------------------
 
 export interface BuildUnifiedSourceOptions {
+  /** Timestamped records only; UTC daily summaries cannot be rebucketed. */
+  rawOnly?: boolean;
   /** ISO-8601 timestamp lower bound (e.g. "2024-01-01T00:00:00.000Z"). Null = all time. */
   sinceIso: string | null;
   /** ISO-8601 timestamp upper bound. Null = no upper bound. */
@@ -45,11 +49,11 @@ export interface UnifiedSourceResult {
  */
 const RAW_COST_COLUMNS = `
           COALESCE(provider_cost_usd, calculated_cost_usd, 0.0) as stored_cost,
-          CASE WHEN COALESCE(provider_cost_usd, calculated_cost_usd) IS NULL THEN tokens_input ELSE 0 END as cost_tokens_input,
-          CASE WHEN COALESCE(provider_cost_usd, calculated_cost_usd) IS NULL THEN tokens_output ELSE 0 END as cost_tokens_output,
-          CASE WHEN COALESCE(provider_cost_usd, calculated_cost_usd) IS NULL THEN tokens_cache_read ELSE 0 END as cost_tokens_cache_read,
-          CASE WHEN COALESCE(provider_cost_usd, calculated_cost_usd) IS NULL THEN tokens_cache_creation ELSE 0 END as cost_tokens_cache_creation,
-          CASE WHEN COALESCE(provider_cost_usd, calculated_cost_usd) IS NULL THEN tokens_reasoning ELSE 0 END as cost_tokens_reasoning`;
+          CASE WHEN ${tokenPriceableUsageSql()} THEN tokens_input ELSE 0 END as cost_tokens_input,
+          CASE WHEN ${tokenPriceableUsageSql()} THEN tokens_output ELSE 0 END as cost_tokens_output,
+          CASE WHEN ${tokenPriceableUsageSql()} THEN tokens_cache_read ELSE 0 END as cost_tokens_cache_read,
+          CASE WHEN ${tokenPriceableUsageSql()} THEN tokens_cache_creation ELSE 0 END as cost_tokens_cache_creation,
+          CASE WHEN ${tokenPriceableUsageSql()} THEN tokens_reasoning ELSE 0 END as cost_tokens_reasoning`;
 
 /**
  * The same columns for a daily_usage_summary row. Its `total_cost` is already
@@ -78,7 +82,8 @@ export function buildUnifiedSource(opts: BuildUnifiedSourceOptions): UnifiedSour
   const sinceDate = sinceIso?.split("T")[0] ?? null;
 
   // Include summaries only when the window starts before rawCutoffDate and no api_key filter is active.
-  const needsAggregated = (!sinceDate || sinceDate < rawCutoffDate) && !apiKeyWhere;
+  const needsAggregated =
+    !opts.rawOnly && (!sinceDate || sinceDate < rawCutoffDate) && !apiKeyWhere;
 
   const unifiedParams: AnalyticsParams = {};
 
@@ -198,7 +203,8 @@ export function buildPresetUnifiedSource(opts: BuildUnifiedSourceOptions): Unifi
   const { sinceIso, rawCutoffDate, apiKeyWhere, apiKeyParams } = opts;
   const sinceDate = sinceIso?.split("T")[0] ?? null;
 
-  const needsAggregated = (!sinceDate || sinceDate < rawCutoffDate) && !apiKeyWhere;
+  const needsAggregated =
+    !opts.rawOnly && (!sinceDate || sinceDate < rawCutoffDate) && !apiKeyWhere;
 
   const presetParams: AnalyticsParams = {};
 

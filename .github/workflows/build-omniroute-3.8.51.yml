@@ -1,0 +1,219 @@
+name: Qualify and publish cumulative house image
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_image:
+        description: Publish a new source-specific candidate after source qualification
+        type: boolean
+        default: false
+      image_digest:
+        description: Existing candidate digest for exact-image qualification only
+        type: string
+        required: false
+      source_commit:
+        description: Exact application commit represented by image_digest
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: house-3854-${{ github.ref }}-${{ inputs.image_digest || 'source' }}
+  cancel-in-progress: false
+
+env:
+  ONNXRUNTIME_NODE_INSTALL: skip
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+  NEXT_TELEMETRY_DISABLED: "1"
+  OMNIROUTE_SKIP_SYSTEM_TRUST: "1"
+  JWT_SECRET: synthetic-house-qualification-secret-at-least-32-characters
+  API_KEY_SECRET: synthetic-house-qualification-api-secret
+  DISABLE_SQLITE_AUTO_BACKUP: "true"
+
+jobs:
+  source:
+    if: inputs.image_digest == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "26.12.1"
+          package-manager-cache: false
+      - uses: ./.github/actions/npm-ci-retry
+        with:
+          cache: "false"
+      - name: Verify exact release base and unchanged runtime/dependency/migration inputs
+        run: |
+          git fetch --depth=1 --no-tags https://github.com/cheaper-inference/OmniRoute.git 1c880c5c95b3f0240d5e4c6c8f0947ec46b5d25e
+          git diff --exit-code 1c880c5c95b3f0240d5e4c6c8f0947ec46b5d25e -- Dockerfile package.json package-lock.json src/lib/db/migrations src/lib/db/migrationRunner src/lib/db/migrationRunner.ts AGENTS.md
+          test "$(node -p 'require("./package.json").version')" = "3.8.54"
+          git diff --check
+      - run: npm run typecheck:core
+      - run: npm run check:dashboard-typecheck
+      - run: npm run lint
+      - name: Validate maintained documentation
+        run: |
+          node scripts/check/check-docs-sync.mjs --mode=pr
+          npm run check:env-doc-sync
+      - name: Run retained behavior and upgrade regressions
+        run: |
+          node --import tsx/esm --import ./open-sse/utils/setupPolyfill.ts --import ./tests/_setup/isolateDataDir.ts --test --test-force-exit --test-concurrency=2 \
+            tests/unit/house-3854-ledger-upgrade.test.ts \
+            tests/unit/team-budget-recorded-costs-20354.test.ts \
+            tests/unit/team-retained-cost-shapes.test.ts \
+            tests/unit/team-usage-limits-pricing-lookups.test.ts \
+            tests/unit/cortecs-ocr-accounting-merge.test.ts \
+            tests/unit/cortecs-rerank-accounting.test.ts \
+            tests/unit/cortecs-rerank-credits.test.ts \
+            tests/unit/cortecs-rerank-usd.test.ts \
+            tests/unit/cortecs-rerank-pricing-scope.test.ts \
+            tests/unit/ocr-embedding-cost-tracking.test.ts \
+            tests/unit/pricingSync.modal.test.ts \
+            tests/unit/media-cost-tracking.test.ts \
+            tests/unit/speech-usage.test.ts \
+            tests/unit/analytics-reporting-time-zone.test.ts \
+            tests/unit/usage-analytics-response-cache.test.ts \
+            tests/unit/tool-choice-schema-normalization.test.ts \
+            tests/integration/tool-choice-none-outbound.test.ts \
+            tests/unit/opaque-reasoning-stream.test.ts \
+            tests/unit/issue-19185-encrypted-reasoning-data-not-content.test.ts \
+            tests/unit/pii-opt-in-default.test.ts
+
+  units:
+    if: inputs.image_digest == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: ["1/8", "2/8", "3/8", "4/8", "5/8", "6/8", "7/8", "8/8"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "26.12.1"
+          package-manager-cache: false
+      - uses: ./.github/actions/npm-ci-retry
+        with:
+          cache: "false"
+      - run: npm run test:unit:ci:shard
+        env:
+          TEST_SHARD: ${{ matrix.shard }}
+
+  vitest:
+    if: inputs.image_digest == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "26.12.1"
+          package-manager-cache: false
+      - uses: ./.github/actions/npm-ci-retry
+        with:
+          cache: "false"
+      - run: npm run test:vitest
+      - run: npm run test:vitest:ui
+
+  publish:
+    if: inputs.image_digest == '' && inputs.publish_image
+    needs: [source, units, vitest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.identity.outputs.image }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Bind a new candidate tag to the exact source
+        id: identity
+        run: |
+          test "$GITHUB_REPOSITORY" = "tiangao88/OmniRoute"
+          source=$(git rev-parse HEAD)
+          image="ghcr.io/tiangao88/omniroute:3.8.54-house-cumulative-${source:0:10}"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "source=$source" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Never overwrite a previously published source tag
+        env:
+          IMAGE: ${{ steps.identity.outputs.image }}
+        run: |
+          if docker buildx imagetools inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "Candidate already exists; qualify its digest or use a new source commit." >&2
+            exit 1
+          fi
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        id: build
+        with:
+          context: .
+          file: Dockerfile
+          target: runner-cli
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.identity.outputs.image }}
+          build-args: |
+            OMNIROUTE_BUILD_MEMORY_MB=8192
+            OMNIROUTE_BUILD_WORKERS=2
+            OMNIROUTE_USE_TURBOPACK=0
+          labels: |
+            org.opencontainers.image.source=https://github.com/tiangao88/OmniRoute
+            org.opencontainers.image.revision=${{ steps.identity.outputs.source }}
+            org.opencontainers.image.version=3.8.54-house-cumulative-${{ steps.identity.outputs.source }}
+          cache-from: type=gha,scope=house-cumulative-amd64
+          cache-to: type=gha,scope=house-cumulative-amd64,mode=max,ignore-error=true
+      - name: Record publication provenance
+        env:
+          IMAGE: ${{ steps.identity.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SOURCE: ${{ steps.identity.outputs.source }}
+        run: |
+          python -c 'import json,os,pathlib;pathlib.Path("house-publication.json").write_text(json.dumps({"image":os.environ["IMAGE"],"digest":os.environ["DIGEST"],"source":os.environ["SOURCE"],"base":"1c880c5c95b3f0240d5e4c6c8f0947ec46b5d25e","deployment":False},indent=2))'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: house-publication
+          path: house-publication.json
+          retention-days: 30
+
+  image:
+    if: inputs.image_digest != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      IMAGE_DIGEST: ${{ inputs.image_digest }}
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Qualify exact public image with fresh data, old schema and restored snapshot
+        run: python scripts/ci/house-3854-image-qualification.py
+      - name: Upload synthetic qualification evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: house-image-qualification
+          path: house-image-report.json
+          if-no-files-found: warn
+          retention-days: 30
