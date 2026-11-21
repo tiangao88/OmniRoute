@@ -1,5 +1,4 @@
 """Exact-image checks with fresh tmpfs data, real old-image state and native snapshot restore."""
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,7 +13,7 @@ source = os.environ["SOURCE_COMMIT"]
 assert re.fullmatch(r"sha256:[a-f0-9]{64}", digest)
 assert re.fullmatch(r"[a-f0-9]{40}", source)
 image = "ghcr.io/tiangao88/omniroute@" + digest
-report = {"image": image, "source": source, "baselineImage": BASELINE,
+report = {"image": image, "source": source, "verificationCommit": os.environ.get("GITHUB_SHA"), "baselineImage": BASELINE,
           "network": "none", "data": "synthetic tmpfs only", "paidModelCalls": 0,
           "productionMutation": False, "checks": []}
 owned = []

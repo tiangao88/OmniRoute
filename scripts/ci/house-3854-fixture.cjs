@@ -43,8 +43,8 @@ async function main() {
   }
   db.prepare("INSERT INTO provider_nodes(id,type,name,prefix,base_url,created_at,updated_at) VALUES (?,?,?,?,?,?,?)")
     .run("synthetic-upgrade-node","openai-compatible","Synthetic EU node","synthetic-eu","https://eu.openrouter.ai/api/v1",created,created);
-  db.prepare("INSERT INTO provider_connections(id,provider,auth_type,name,api_key,is_active) VALUES (?,?,?,?,?,0)")
-    .run("synthetic-upgrade-connection","synthetic-upgrade-node","apikey","Synthetic connection",envelope);
+  db.prepare("INSERT INTO provider_connections(id,provider,auth_type,name,api_key,is_active,created_at,updated_at) VALUES (?,?,?,?,?,0,?,?)")
+    .run("synthetic-upgrade-connection","synthetic-upgrade-node","apikey","Synthetic connection",envelope,created,created);
   db.prepare("INSERT INTO combos(id,name,data,created_at,updated_at) VALUES (?,?,?,?,?)")
     .run("synthetic-upgrade-combo","synthetic-route",JSON.stringify({models:["synthetic-eu/synthetic-model"],strategy:"priority"}),created,created);
   db.prepare("INSERT INTO key_value(namespace,key,value) VALUES ('pricing','synthetic-token-provider',?)")
