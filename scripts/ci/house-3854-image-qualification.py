@@ -179,7 +179,12 @@ console.log(JSON.stringify({canonical228:true,accounting237:true,snapshot}));
         snapshot = migration.pop("snapshot")
         assert re.fullmatch(r"/app/data/db_backups/db_state-[a-f0-9]{64}_pre-migration\.sqlite", snapshot)
         restored_file = folder / "native-restore.sqlite"
-        run(["docker", "cp", upgraded + ":" + snapshot, str(restored_file)])
+        # Docker's archive API does not expose this tmpfs mount. Read the native
+        # snapshot inside its mount namespace without changing its bytes.
+        snapshot_bytes = run(["docker", "exec", upgraded, "node", "-e",
+                              "process.stdout.write(require('node:fs').readFileSync(process.argv[1]))",
+                              snapshot], text=False).stdout
+        restored_file.write_bytes(snapshot_bytes)
         record("native ledger reconciliation and durable snapshot", migration)
         restored = "house-3853-restored"
         boot(restored, BASELINE, restored_file, meta)
