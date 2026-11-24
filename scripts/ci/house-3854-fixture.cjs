@@ -25,6 +25,7 @@ const queries = {
   nodes: "SELECT id,type,name,prefix,base_url FROM provider_nodes WHERE id='synthetic-upgrade-node'",
   combos: "SELECT id,name,data FROM combos WHERE id='synthetic-upgrade-combo'",
   pricing: "SELECT namespace,key,value FROM key_value WHERE namespace='pricing' AND key='synthetic-token-provider'",
+  catalog: "SELECT namespace,key,value FROM key_value WHERE namespace='syncedAvailableModels' AND key='synthetic-upgrade-node:synthetic-upgrade-connection'",
   usage: "SELECT timestamp,provider,model,api_key_id,billing_team_id,tokens_input,tokens_output,success,provider_cost_usd,calculated_cost_usd,billing_unit,billing_quantity,team_rollup_processed_at FROM usage_history WHERE billing_team_id='synthetic-upgrade-team' ORDER BY id",
   retained: "SELECT * FROM daily_team_usage_summary WHERE team_id='synthetic-upgrade-team' ORDER BY date",
 };
@@ -43,12 +44,14 @@ async function main() {
   }
   db.prepare("INSERT INTO provider_nodes(id,type,name,prefix,base_url,created_at,updated_at) VALUES (?,?,?,?,?,?,?)")
     .run("synthetic-upgrade-node","openai-compatible","Synthetic EU node","synthetic-eu","https://eu.openrouter.ai/api/v1",created,created);
-  db.prepare("INSERT INTO provider_connections(id,provider,auth_type,name,api_key,is_active) VALUES (?,?,?,?,?,0)")
-    .run("synthetic-upgrade-connection","synthetic-upgrade-node","apikey","Synthetic connection",envelope);
+  db.prepare("INSERT INTO provider_connections(id,provider,auth_type,name,api_key,is_active,created_at,updated_at) VALUES (?,?,?,?,?,0,?,?)")
+    .run("synthetic-upgrade-connection","synthetic-upgrade-node","apikey","Synthetic connection",envelope,created,created);
   db.prepare("INSERT INTO combos(id,name,data,created_at,updated_at) VALUES (?,?,?,?,?)")
     .run("synthetic-upgrade-combo","synthetic-route",JSON.stringify({models:["synthetic-eu/synthetic-model"],strategy:"priority"}),created,created);
   db.prepare("INSERT INTO key_value(namespace,key,value) VALUES ('pricing','synthetic-token-provider',?)")
     .run(JSON.stringify({"synthetic-model":{input:1,output:2,_source:"user"}}));
+  db.prepare("INSERT INTO key_value(namespace,key,value) VALUES ('syncedAvailableModels','synthetic-upgrade-node:synthetic-upgrade-connection',?)")
+    .run(JSON.stringify([{id:"synthetic-model",name:"Synthetic model"}]));
   db.prepare("INSERT INTO usage_history(timestamp,provider,model,api_key_id,billing_team_id,tokens_input,tokens_output,success,endpoint,billing_unit,billing_quantity,provider_cost_usd) VALUES (?,?,?,?,?,3,49,1,'/v1/audio/transcriptions','second',22,0.0014)")
     .run(stamp,"synthetic-audio","synthetic-transcribe","synthetic-upgrade-key-0",team);
   const shape=JSON.stringify({[JSON.stringify([0,0,0,0,0,null,0.002,"/v1/ocr","page"])]:1});

@@ -103,6 +103,46 @@ async function main() {
   }
   for (const mode of modes) {
     for (const fragment of [1, 37]) {
+      const usageEvidence = Object.fromEntries(
+        ["input", "output", "cacheRead", "cacheCreation"].map((key) => [
+          key,
+          { source: "reported" },
+        ])
+      );
+      const usageOnly = { prompt_tokens: 2, completion_tokens: 1, usage_evidence: usageEvidence };
+      const answer = frame({
+        choices: [{ index: 0, delta: { content: "Hello." }, finish_reason: "stop" }],
+      });
+      const reported = await run(
+        answer + frame({ choices: [], usage: usageOnly }) + "data: [DONE]\n\n",
+        mode,
+        fragment
+      );
+      const visibleText = (events) =>
+        events
+          .flatMap((event) => event.choices ?? [])
+          .map((choice) => choice.delta?.content ?? "")
+          .join("");
+      assert.equal(visibleText(reported), "Hello.");
+      assert.deepEqual(reported.find((event) => event.usage)?.usage, usageOnly);
+      checks++;
+
+      if (mode.credential) {
+        const splitFrame = (text) =>
+          frame({ choices: [], usage: { usage_evidence: { note: text } } });
+        const secretHalves = [secret.slice(0, 13), secret.slice(13)];
+        const masked = await run(
+          answer + secretHalves.map(splitFrame).join("") + "data: [DONE]\n\n",
+          mode,
+          fragment
+        );
+        assert.equal(visibleText(masked), "Hello.");
+        const notes = masked.map((event) => event.usage?.usage_evidence?.note ?? "").join("");
+        assert.match(notes, /\[REDACTED:openai\]/);
+        for (const half of secretHalves) assert(!JSON.stringify(masked).includes(half));
+        checks++;
+      }
+
       for (const ending of ["finish", "done", "eof"]) {
         const input =
           opaque.map((value) => frame(delta({ reasoning_details: [value] }))).join("") +

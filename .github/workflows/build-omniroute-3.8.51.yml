@@ -83,6 +83,10 @@ jobs:
             tests/integration/tool-choice-none-outbound.test.ts \
             tests/unit/opaque-reasoning-stream.test.ts \
             tests/unit/issue-19185-encrypted-reasoning-data-not-content.test.ts \
+            tests/unit/streaming-redaction-metadata-flush.test.ts \
+            tests/unit/streaming-credential-transform.test.ts \
+            tests/unit/sse-metadata-hold-accounting.test.ts \
+            tests/unit/sse-metadata-path-escaping.test.ts \
             tests/unit/pii-opt-in-default.test.ts
 
   units:
