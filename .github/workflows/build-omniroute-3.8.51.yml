@@ -15,6 +15,10 @@ on:
         description: Exact application commit represented by image_digest
         type: string
         required: false
+      short_alias_qualification_run:
+        description: Completed exact-image qualification run for the short alias (no rebuild)
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -34,7 +38,7 @@ env:
 
 jobs:
   source:
-    if: inputs.image_digest == ''
+    if: inputs.image_digest == '' && inputs.short_alias_qualification_run == ''
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -90,7 +94,7 @@ jobs:
             tests/unit/pii-opt-in-default.test.ts
 
   units:
-    if: inputs.image_digest == ''
+    if: inputs.image_digest == '' && inputs.short_alias_qualification_run == ''
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -114,7 +118,7 @@ jobs:
           TEST_SHARD: ${{ matrix.shard }}
 
   baseline:
-    if: inputs.image_digest == ''
+    if: inputs.image_digest == '' && inputs.short_alias_qualification_run == ''
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -161,7 +165,7 @@ jobs:
           retention-days: 30
 
   vitest:
-    if: inputs.image_digest == ''
+    if: inputs.image_digest == '' && inputs.short_alias_qualification_run == ''
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -179,7 +183,7 @@ jobs:
       - run: npm run test:vitest:ui
 
   publish:
-    if: inputs.image_digest == '' && inputs.publish_image
+    if: inputs.image_digest == '' && inputs.publish_image && inputs.short_alias_qualification_run == ''
     needs: [source, units, vitest, baseline]
     runs-on: ubuntu-latest
     timeout-minutes: 150
@@ -248,7 +252,7 @@ jobs:
           retention-days: 30
 
   image:
-    if: inputs.image_digest != ''
+    if: inputs.image_digest != '' && inputs.short_alias_qualification_run == ''
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -268,3 +272,56 @@ jobs:
           path: house-image-report.json
           if-no-files-found: warn
           retention-days: 30
+
+  short-alias:
+    if: inputs.short_alias_qualification_run != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    permissions:
+      actions: read
+      packages: write
+    env:
+      QUALIFICATION_RUN: ${{ inputs.short_alias_qualification_run }}
+      EXPECTED_SOURCE: 17dc694aba6ddd8b8996bdc494d75c5e3e7a19d1
+      IMAGE_NAME: ghcr.io/tiangao88/omniroute
+      ALIAS_TAG: 3.8.54-house-20508
+    steps:
+      - name: Verify the successful qualification and resolve its digest
+        id: qualified
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "tiangao88/OmniRoute"
+          [[ "$QUALIFICATION_RUN" =~ ^[0-9]+$ ]]
+          qualified_sha=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFICATION_RUN" \
+            --jq 'select(.status == "completed" and .conclusion == "success" and .head_branch == "test/house-20508-backport") | .head_sha')
+          test "$qualified_sha" = "$EXPECTED_SOURCE"
+          gh run download "$QUALIFICATION_RUN" -R "$GITHUB_REPOSITORY" --name house-image-qualification
+          digest=$(python -c 'import json,os,re; v=json.load(open("house-image-report.json")); assert v["result"]=="pass" and v["source"]==os.environ["EXPECTED_SOURCE"]; name,digest=v["image"].rsplit("@",1); assert name==os.environ["IMAGE_NAME"] and re.fullmatch(r"sha256:[0-9a-f]{64}",digest); print(digest)')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add the short alias to the existing manifest and verify the digest
+        env:
+          DIGEST: ${{ steps.qualified.outputs.digest }}
+        run: |
+          set -euo pipefail
+          alias_ref="$IMAGE_NAME:$ALIAS_TAG"
+          source_ref="$IMAGE_NAME@$DIGEST"
+          test "$(docker buildx imagetools inspect "$source_ref" --format '{{.Manifest.Digest}}')" = "$DIGEST"
+          if current=$(docker buildx imagetools inspect "$alias_ref" --format '{{.Manifest.Digest}}' 2>&1); then
+            test "$current" = "$DIGEST"
+          else
+            case "$current" in
+              *": $alias_ref: not found") ;;
+              *) printf '%s\n' "$current" >&2; exit 1 ;;
+            esac
+            docker buildx imagetools create --prefer-index=false --tag "$alias_ref" "$source_ref"
+          fi
+          test "$(docker buildx imagetools inspect "$alias_ref" --format '{{.Manifest.Digest}}')" = "$DIGEST"
+          printf '%s@%s\n' "$alias_ref" "$DIGEST"
